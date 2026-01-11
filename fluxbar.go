@@ -30,7 +30,7 @@ func main() {
 	swiftbar := os.Getenv("SWIFTBAR")
 
 	// Miniflux Client
-	client := miniflux.New(MINIFLUX_SERVER, MINIFLUX_APIKEY)
+	client := miniflux.NewClient(MINIFLUX_SERVER, MINIFLUX_APIKEY)
 	filter := miniflux.Filter{
 		Status: miniflux.EntryStatusUnread,
 		Order:  "published_at",
