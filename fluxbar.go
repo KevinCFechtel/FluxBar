@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	//"os"
+	"os"
 	"strconv"
 
 	miniflux "miniflux.app/client"
@@ -20,27 +20,42 @@ type MinifluxFeedEntrie struct {
 }
 
 func main() {
-	//argsWithProg := os.Args
+	argsWithProg := os.Args
 	client := miniflux.New(MINIFLUX_SERVER, MINIFLUX_APIKEY)
 	filter := miniflux.Filter{
 		Status: miniflux.EntryStatusUnread,
+		Order:  "published_at",
+		Direction: "asc",
 	}
-	entries, err := client.Entries(&filter)
-	if err != nil {
-		return
+	entryIDs := make([]int64,0)
+	if len(argsWithProg) > 1 {
+		param1 := argsWithProg[1]
+		id, err := strconv.ParseInt(param1, 10, 64)
+		if err == nil {
+			entryIDs = append(entryIDs, id)
+		}
 	}
+	if len(entryIDs) > 0 {
+		client.UpdateEntries(entryIDs, miniflux.EntryStatusRead)
+	}
+
 	entriesList := make([]MinifluxFeedEntrie, 0)
-	for _, entry := range entries.Entries {
-		entriesList = append(entriesList, MinifluxFeedEntrie{
-			EntriID: entry.ID,
-			Title: entry.Title,
-			URL:   entry.URL,
-			FeedName: entry.Feed.Title,
-		})
+	entriesCount := 0
+	entries, err := client.Entries(&filter)
+	if err == nil {
+		entriesCount = entries.Total
+		for _, entry := range entries.Entries {
+			entriesList = append(entriesList, MinifluxFeedEntrie{
+				EntriID: entry.ID,
+				Title: entry.Title,
+				URL:   entry.URL,
+				FeedName: entry.Feed.Title,
+			})
+		}
 	}
 
 	// Output
-	fmt.Println(strconv.Itoa(entries.Total) + " | image=" + ICON);
+	fmt.Println(strconv.Itoa(entriesCount) + " | image=" + ICON);
 	fmt.Println("---");
 	//fmt.Println(argsWithProg)
 	//fmt.Println("**refreh** | md=true refresh=true param1=TEST href=https://test.de")
