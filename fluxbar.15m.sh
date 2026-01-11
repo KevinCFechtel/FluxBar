@@ -9,5 +9,5 @@
 # <xbar.dependencies>bash</xbar.dependencies>
 
 
-# Output menu items
+# Start fluxbar binary
 $SWIFTBAR_PLUGINS_PATH/../fluxbar/fluxbar.cgo "$0" "$1"
