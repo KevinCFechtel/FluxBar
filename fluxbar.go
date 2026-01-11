@@ -25,6 +25,9 @@ type MinifluxFeedEntrie struct {
 func main() {
 	argsWithProg := os.Args
 	shellPath := ""
+	var resetAnsi = "\033[0m"
+	var boldAnsi = "\033[37m"
+	swiftbar := os.Getenv("SWIFTBAR")
 
 	// Miniflux Client
 	client := miniflux.New(MINIFLUX_SERVER, MINIFLUX_APIKEY)
@@ -60,7 +63,7 @@ func main() {
 		}
 	}
 	if len(entryIDs) > 0 {
-		//client.UpdateEntries(entryIDs, miniflux.EntryStatusRead)
+		client.UpdateEntries(entryIDs, miniflux.EntryStatusRead)
 	}
 
 	entriesList := make([]MinifluxFeedEntrie, 0)
@@ -82,6 +85,10 @@ func main() {
 	fmt.Println(strconv.Itoa(entriesCount) + " | image=" + ICON);
 	fmt.Println("---");
 	for _, entry := range entriesList {
-		fmt.Println("**" + entry.FeedName + "**: " + entry.Title + " | bash=" + shellPath + " refresh=true param1=" + strconv.FormatInt(entry.EntryID, 10) + " terminal=false md=true ") //href=" + entry.URL
+		if swiftbar == "1" {
+			fmt.Println("**" + entry.FeedName + "**: " + entry.Title + " | bash=" + shellPath + " refresh=true param1=" + strconv.FormatInt(entry.EntryID, 10) + " terminal=false md=true") //href=" + entry.URL
+		} else {
+			fmt.Println(boldAnsi + entry.FeedName + ": " + resetAnsi + entry.Title + " | bash=" + shellPath + " refresh=true param1=" + strconv.FormatInt(entry.EntryID, 10) + " terminal=false ansi=true href=" + entry.URL)
+		}
 	}
 }
