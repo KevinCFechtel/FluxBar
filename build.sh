@@ -1,0 +1,1 @@
+GOOS=darwin GOARCH=arm64 go build -o fluxbar.1m.cgo fluxbar.go
