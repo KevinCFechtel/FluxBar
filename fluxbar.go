@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	miniflux "miniflux.app/v2/client"
 )
@@ -72,11 +73,13 @@ func main() {
 	if err == nil {
 		entriesCount = entries.Total
 		for _, entry := range entries.Entries {
+			titel := strings.ReplaceAll(entry.Title, "|", " ")
+			feedname := strings.ReplaceAll(entry.Feed.Title, "|", " ")
 			entriesList = append(entriesList, MinifluxFeedEntrie{
 				EntryID: entry.ID,
-				Title: entry.Title,
+				Title: titel,
 				URL:   entry.URL,
-				FeedName: entry.Feed.Title,
+				FeedName: feedname,
 			})
 		}
 	}
