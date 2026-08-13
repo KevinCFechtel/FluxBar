@@ -8,6 +8,7 @@
 *.so
 *.dylib
 *.cgo
+/dist/
 
 # Test binary, built with `go test -c`
 *.test
@@ -27,6 +28,7 @@ go.work.sum
 
 # env file
 *.env
+!miniflux.env.example
 .codex-context/
 
 # Editor/IDE
