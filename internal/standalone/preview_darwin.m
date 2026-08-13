@@ -7,6 +7,20 @@
 
 static const NSTimeInterval FluxBarHoverDelay = 0.5;
 static const NSUInteger FluxBarMaximumImageBytes = 10 * 1024 * 1024;
+static const CGFloat FluxBarPreviewHorizontalPadding = 16;
+static const CGFloat FluxBarPreviewVerticalPadding = 16;
+static const CGFloat FluxBarPreviewSpacing = 10;
+
+typedef struct {
+    CGFloat width;
+    CGFloat height;
+    CGFloat contentWidth;
+    CGFloat imageHeight;
+    CGFloat titleHeight;
+    CGFloat feedHeight;
+    CGFloat previewHeight;
+    bool previewScrolls;
+} FluxBarPreviewLayout;
 
 @interface FluxBarArticlePreview : NSObject
 @property(nonatomic, copy) NSString *title;
@@ -96,10 +110,14 @@ static NSScreen *fluxbar_screen_for_point(NSPoint point) {
     return NSScreen.mainScreen;
 }
 
+static NSRect fluxbar_visible_frame_for_point(NSPoint point) {
+    NSScreen *screen = fluxbar_screen_for_point(point);
+    return screen != nil ? screen.visibleFrame : NSMakeRect(0, 0, 1440, 900);
+}
+
 static void fluxbar_position_panel(NSPanel *panel) {
     NSPoint mouse = NSEvent.mouseLocation;
-    NSScreen *screen = fluxbar_screen_for_point(mouse);
-    NSRect visible = screen != nil ? screen.visibleFrame : NSMakeRect(0, 0, 1440, 900);
+    NSRect visible = fluxbar_visible_frame_for_point(mouse);
     NSSize size = panel.frame.size;
     CGFloat gap = 24;
     CGFloat x = mouse.x - size.width - gap;
@@ -110,6 +128,74 @@ static void fluxbar_position_panel(NSPanel *panel) {
     CGFloat y = mouse.y - size.height / 2;
     y = MIN(MAX(y, NSMinY(visible)), NSMaxY(visible) - size.height);
     [panel setFrameOrigin:NSMakePoint(x, y)];
+}
+
+static CGFloat fluxbar_measured_text_height(NSString *text, NSFont *font, CGFloat width) {
+    if (text.length == 0 || width <= 0) {
+        return 0;
+    }
+    NSRect bounds = [text boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX)
+                                       options:NSStringDrawingUsesLineFragmentOrigin |
+                                               NSStringDrawingUsesFontLeading
+                                    attributes:@{NSFontAttributeName: font}];
+    return ceil(bounds.size.height);
+}
+
+static FluxBarPreviewLayout fluxbar_preview_layout(
+    FluxBarArticlePreview *article,
+    bool hasImage,
+    NSRect visibleFrame
+) {
+    NSFont *titleFont = [NSFont boldSystemFontOfSize:15];
+    NSFont *feedFont = [NSFont systemFontOfSize:12];
+    NSFont *previewFont = [NSFont systemFontOfSize:13];
+    NSString *previewText = article.preview.length > 0
+        ? article.preview
+        : @"Keine Textvorschau verfügbar.";
+
+    CGFloat maximumWidth = MIN(500, MAX(260, visibleFrame.size.width - 32));
+    CGFloat minimumWidth = MIN(hasImage ? 360 : 300, maximumWidth);
+    CGFloat maximumHeight = MIN(hasImage ? 520 : 340, MAX(180, visibleFrame.size.height - 32));
+
+    FluxBarPreviewLayout selected = {0};
+    for (CGFloat width = minimumWidth; width <= maximumWidth; width += 20) {
+        CGFloat contentWidth = width - 2 * FluxBarPreviewHorizontalPadding;
+        CGFloat imageHeight = hasImage ? MIN(180, floor(contentWidth * 0.46)) : 0;
+        CGFloat titleHeight = MIN(
+            fluxbar_measured_text_height(article.title, titleFont, contentWidth),
+            ceil(titleFont.pointSize * 1.25 * 3)
+        );
+        CGFloat feedHeight = article.feed.length > 0
+            ? MIN(
+                fluxbar_measured_text_height(article.feed, feedFont, contentWidth),
+                ceil(feedFont.pointSize * 1.25 * 2)
+            )
+            : 0;
+        CGFloat measuredPreviewHeight = fluxbar_measured_text_height(
+            previewText,
+            previewFont,
+            contentWidth
+        ) + 8;
+        CGFloat previewHeight = MAX(26, measuredPreviewHeight);
+        NSUInteger arrangedViews = 2 + (hasImage ? 1 : 0) + (article.feed.length > 0 ? 1 : 0);
+        CGFloat fixedHeight = 2 * FluxBarPreviewVerticalPadding + imageHeight + titleHeight + feedHeight +
+            FluxBarPreviewSpacing * (arrangedViews - 1);
+        CGFloat naturalHeight = fixedHeight + previewHeight;
+
+        selected.width = width;
+        selected.height = MIN(naturalHeight, maximumHeight);
+        selected.contentWidth = contentWidth;
+        selected.imageHeight = imageHeight;
+        selected.titleHeight = titleHeight;
+        selected.feedHeight = feedHeight;
+        selected.previewHeight = MAX(26, selected.height - fixedHeight);
+        selected.previewScrolls = measuredPreviewHeight > selected.previewHeight + 1;
+
+        if (naturalHeight <= maximumHeight || width + 20 > maximumWidth) {
+            break;
+        }
+    }
+    return selected;
 }
 
 static void fluxbar_load_hover_image(
@@ -153,10 +239,11 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
     fluxbar_close_hover_panel();
 
     bool hasImage = article.imageURL != nil;
-    CGFloat width = 440;
-    CGFloat height = hasImage ? 510 : 300;
+    NSRect visibleFrame = fluxbar_visible_frame_for_point(NSEvent.mouseLocation);
+    FluxBarPreviewLayout layout = fluxbar_preview_layout(article, hasImage, visibleFrame);
 
-    NSVisualEffectView *root = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+    NSVisualEffectView *root = [[NSVisualEffectView alloc]
+        initWithFrame:NSMakeRect(0, 0, layout.width, layout.height)];
     root.material = NSVisualEffectMaterialPopover;
     root.blendingMode = NSVisualEffectBlendingModeBehindWindow;
     root.state = NSVisualEffectStateActive;
@@ -167,8 +254,13 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
     NSStackView *stack = [[NSStackView alloc] init];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
-    stack.spacing = 10;
-    stack.edgeInsets = NSEdgeInsetsMake(16, 16, 16, 16);
+    stack.spacing = FluxBarPreviewSpacing;
+    stack.edgeInsets = NSEdgeInsetsMake(
+        FluxBarPreviewVerticalPadding,
+        FluxBarPreviewHorizontalPadding,
+        FluxBarPreviewVerticalPadding,
+        FluxBarPreviewHorizontalPadding
+    );
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     [root addSubview:stack];
     [NSLayoutConstraint activateConstraints:@[
@@ -191,8 +283,8 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
             imageView.image = [[NSImage alloc] initWithData:article.fallbackIcon];
         }
         imageView.translatesAutoresizingMaskIntoConstraints = NO;
-        [imageView.heightAnchor constraintEqualToConstant:180].active = YES;
-        [imageView.widthAnchor constraintEqualToConstant:408].active = YES;
+        [imageView.heightAnchor constraintEqualToConstant:layout.imageHeight].active = YES;
+        [imageView.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
         [stack addArrangedSubview:imageView];
     }
 
@@ -201,7 +293,10 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
         [NSFont boldSystemFontOfSize:15],
         NSColor.labelColor
     );
-    [titleLabel.widthAnchor constraintEqualToConstant:408].active = YES;
+    titleLabel.maximumNumberOfLines = 3;
+    titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [titleLabel.heightAnchor constraintEqualToConstant:layout.titleHeight].active = YES;
+    [titleLabel.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
     [stack addArrangedSubview:titleLabel];
     if (article.feed.length > 0) {
         NSTextField *feedLabel = fluxbar_label(
@@ -209,19 +304,24 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
             [NSFont systemFontOfSize:12],
             NSColor.secondaryLabelColor
         );
-        [feedLabel.widthAnchor constraintEqualToConstant:408].active = YES;
+        feedLabel.maximumNumberOfLines = 2;
+        feedLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        [feedLabel.heightAnchor constraintEqualToConstant:layout.feedHeight].active = YES;
+        [feedLabel.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
         [stack addArrangedSubview:feedLabel];
     }
 
     NSScrollView *scrollView = [[NSScrollView alloc] init];
-    scrollView.hasVerticalScroller = YES;
+    scrollView.hasVerticalScroller = layout.previewScrolls;
+    scrollView.autohidesScrollers = YES;
     scrollView.drawsBackground = NO;
     scrollView.borderType = NSNoBorder;
     scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-    [scrollView.heightAnchor constraintEqualToConstant:(hasImage ? 210 : 190)].active = YES;
-    [scrollView.widthAnchor constraintEqualToConstant:408].active = YES;
+    [scrollView.heightAnchor constraintEqualToConstant:layout.previewHeight].active = YES;
+    [scrollView.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
 
-    NSTextView *textView = [[NSTextView alloc] initWithFrame:NSMakeRect(0, 0, 408, 190)];
+    NSTextView *textView = [[NSTextView alloc]
+        initWithFrame:NSMakeRect(0, 0, layout.contentWidth, layout.previewHeight)];
     textView.string = article.preview.length > 0 ? article.preview : @"Keine Textvorschau verfügbar.";
     textView.font = [NSFont systemFontOfSize:13];
     textView.textColor = NSColor.labelColor;
@@ -231,13 +331,16 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
     textView.textContainerInset = NSMakeSize(0, 4);
     textView.verticallyResizable = YES;
     textView.horizontallyResizable = NO;
+    textView.minSize = NSMakeSize(0, layout.previewHeight);
+    textView.maxSize = NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX);
     textView.autoresizingMask = NSViewWidthSizable;
+    textView.textContainer.containerSize = NSMakeSize(layout.contentWidth, CGFLOAT_MAX);
     textView.textContainer.widthTracksTextView = YES;
     scrollView.documentView = textView;
     [stack addArrangedSubview:scrollView];
 
     NSPanel *panel = [[NSPanel alloc]
-        initWithContentRect:NSMakeRect(0, 0, width, height)
+        initWithContentRect:NSMakeRect(0, 0, layout.width, layout.height)
                   styleMask:(NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel)
                     backing:NSBackingStoreBuffered
                       defer:NO];

@@ -115,6 +115,10 @@ Der von Miniflux gelieferte HTML-Inhalt wird ohne Skripte, Styles oder Markup in
 
 In der Standalone-App erscheint nach 500 ms über einem hervorgehobenen Artikel eine nicht aktivierbare native macOS-Vorschau mit Titel, Feed und Klartext. Sie schließt sich beim Wechsel des Eintrags oder Verlassen des Menüs und stiehlt dem Menü weder Fokus noch Mausereignisse. Enthält der Miniflux-Inhalt ein geeignetes Artikelbild, wird es erst nach Ablauf der Hover-Verzögerung geladen und oberhalb des Texts angezeigt; deklarierte Tracking-Pixel bis 2 × 2 Pixel werden übersprungen. Ein Klick auf den Menüeintrag öffnet immer direkt den Originalartikel im Browser und markiert ihn anschließend als gelesen.
 
+Die Vorschau passt Breite und Höhe an Titel, Feed, Textmenge und vorhandenen
+Bildbereich an. Erst wenn die verfügbare Bildschirmfläche beziehungsweise die
+Maximalgröße erreicht ist, wird der Text innerhalb der Vorschau scrollbar.
+
 ## Entwicklung
 
 ```bash
