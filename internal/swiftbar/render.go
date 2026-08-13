@@ -13,6 +13,7 @@ import (
 type Options struct {
 	ShellPath string
 	SwiftBar  bool
+	DarkMode  bool
 	TitleIcon []byte
 }
 
@@ -34,13 +35,16 @@ func Render(writer io.Writer, entries []model.Entry, total int, options Options)
 
 	for _, entry := range entries {
 		label := entryLabel(entry, options.SwiftBar)
-		parameters := imageParameters(entry.Icon, options.SwiftBar)
+		parameters := imageParameters(iconForAppearance(entry, options.DarkMode), options.SwiftBar)
 		if options.ShellPath != "" {
 			parameters += " bash=" + quote(options.ShellPath)
 			parameters += " refresh=true param1=" + strconv.FormatInt(entry.ID, 10) + " terminal=false"
 		}
 		if options.SwiftBar {
 			parameters += " md=true"
+			if entry.Preview != "" {
+				parameters += " tooltip=" + quote(entry.Preview)
+			}
 		} else {
 			parameters += " ansi=true"
 		}
@@ -64,6 +68,13 @@ func entryLabel(entry model.Entry, swiftBar bool) string {
 		return "**" + escapeMarkdown(feed) + "**: " + title
 	}
 	return "\x1b[37m" + feed + ": \x1b[0m" + title
+}
+
+func iconForAppearance(entry model.Entry, darkMode bool) []byte {
+	if darkMode && len(entry.DarkIcon) > 0 {
+		return entry.DarkIcon
+	}
+	return entry.Icon
 }
 
 func imageParameters(icon []byte, swiftBar bool) string {

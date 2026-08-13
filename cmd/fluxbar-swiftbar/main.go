@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KevinCFechtel/FluxBar/internal/assets"
@@ -58,9 +59,17 @@ func main() {
 	if err != nil {
 		logger.Printf("Menüleisten-Icon konnte nicht verarbeitet werden: %v", err)
 	}
+	darkMode := strings.EqualFold(os.Getenv("OS_APPEARANCE"), "Dark")
+	if debugIcons, _ := strconv.ParseBool(os.Getenv("FLUXBAR_DEBUG_ICONS")); debugIcons {
+		logger.Printf(
+			"level=debug component=swiftbar event=appearance_selected os_appearance=%q dark=%t",
+			os.Getenv("OS_APPEARANCE"), darkMode,
+		)
+	}
 	if err := swiftbar.Render(os.Stdout, entries, total, swiftbar.Options{
 		ShellPath: shellPath,
 		SwiftBar:  os.Getenv("SWIFTBAR") == "1",
+		DarkMode:  darkMode,
 		TitleIcon: titleIcon,
 	}); err != nil {
 		logger.Printf("SwiftBar-Ausgabe fehlgeschlagen: %v", err)
@@ -70,13 +79,13 @@ func main() {
 func newLogger() *log.Logger {
 	executable, err := os.Executable()
 	if err != nil {
-		return log.New(os.Stderr, "", log.LstdFlags)
+		return log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 	}
 	logFile, err := os.OpenFile(filepath.Join(filepath.Dir(executable), "fluxbar.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return log.New(os.Stderr, "", log.LstdFlags)
+		return log.New(os.Stderr, "", log.LstdFlags|log.Lmicroseconds)
 	}
-	return log.New(logFile, "", log.LstdFlags)
+	return log.New(logFile, "", log.LstdFlags|log.Lmicroseconds)
 }
 
 func printError(err error) {

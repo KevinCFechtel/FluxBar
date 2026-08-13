@@ -7,5 +7,8 @@ type Entry struct {
 	URL      string
 	FeedID   int64
 	FeedName string
+	Preview  string
+	ImageURL string
 	Icon     []byte
+	DarkIcon []byte
 }
