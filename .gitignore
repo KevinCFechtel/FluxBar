@@ -35,3 +35,10 @@ go.work.sum
 # .idea/
 # .vscode/
 .DS_Store
+*.log
+*.env.*
+!*.env.example
+*.p8
+*.p12
+*.pem
+*.key

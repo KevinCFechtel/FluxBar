@@ -86,6 +86,7 @@ func NewConfigured(factory ReaderFactory, editor SettingsEditor, logger *log.Log
 	app := New(nil, logger, icon)
 	app.readerFactory = factory
 	app.settingsEditor = editor
+	app.settings.ShowSplash = true
 	return app
 }
 
@@ -126,6 +127,9 @@ func (app *App) ready() {
 	} else {
 		app.logger.Printf("Einstellungen konnten nicht geladen werden: %v", err)
 		app.renderError(err)
+	}
+	if app.settings.ShowSplash {
+		showStartupSplash()
 	}
 	go app.eventLoop()
 	go app.scheduleRefresh()

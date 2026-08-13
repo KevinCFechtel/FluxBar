@@ -38,12 +38,62 @@ open dist/FluxBar.app
 
 Die Anwendung erscheint nur in der Menüleiste (`LSUIElement`) und nicht im Dock. Sie aktualisiert Miniflux beim Start, manuell über „Aktualisieren“ und danach alle 15 Minuten. Das aktuelle macOS-Erscheinungsbild wird nativ über AppKit erkannt; bei einem Wechsel zwischen Light und Dark Mode wird das Menü automatisch neu aufgebaut. Das Log liegt unter `~/Library/Application Support/FluxBar/fluxbar.log`.
 
+Das App-Bundle verwendet `assets/FluxBarIcon.png` als Ausgangsgrafik für das
+vollständige macOS-Icon `standalone/AppIcon.icns`. Das Menüleisten-Symbol bleibt
+davon unabhängig ein monochromes Template-Icon.
+
 Die Zugangsdaten lassen sich jederzeit über „Einstellungen…“ ändern. Das native
 Einstellungsfenster verwendet für den API-Key ein Passwortfeld. Nach dem Speichern
 wird der Go-basierte Miniflux-Client mit den neuen Werten neu erzeugt; laufende
-Abfragen mit der alten Konfiguration werden verworfen.
+Abfragen mit der alten Konfiguration werden verworfen. Die üblichen macOS-
+Tastenkürzel zum Ausschneiden, Kopieren, Einfügen und Auswählen funktionieren in
+den Eingabefeldern. Beim Start zeigt FluxBar kurz an, dass die App nun in der
+Menüleiste läuft. Diese Startanzeige kann im Einstellungsdialog deaktiviert werden;
+die Auswahl wird zusammen mit der übrigen Konfiguration im Schlüsselbund gespeichert.
 
 Für einen automatischen Start kann `dist/FluxBar.app` nach `/Applications` kopiert und in macOS unter „Systemeinstellungen → Allgemein → Anmeldeobjekte“ hinzugefügt werden. Für die Verteilung an andere Macs sollte die App mit einer Developer-ID signiert und notarisiert werden; lokal erzeugt das Skript eine Ad-hoc-Signatur.
+
+### Signiertes und notarisiertes Release
+
+Apple-Zugangsdaten werden nicht im Repository gespeichert. Einmalig wird dafür ein
+geschütztes Profil im macOS-Schlüsselbund angelegt. `notarytool` fragt die benötigten
+Angaben interaktiv ab; das App-spezifische Passwort erscheint dadurch nicht in der
+Shell-History:
+
+```bash
+xcrun notarytool store-credentials FluxBar-notary
+```
+
+Danach werden Signaturidentität und Name des Schlüsselbundprofils in der lokalen,
+durch Git ignorierten Datei `standalone/.env` hinterlegt. Als Vorlage dient
+`standalone/.env.example`. Das Release-Skript lädt diese Datei automatisch und führt
+Build, Developer-ID-Signatur mit Hardened Runtime, Notarisierung, Stapling und
+sämtliche Prüfungen aus:
+
+```bash
+./standalone/release.sh
+```
+
+Alternativ kann für `SIGNING_IDENTITY` der SHA-1-Fingerabdruck aus
+`security find-identity -v -p codesigning` verwendet werden. Die Identität und der
+Profilname sind keine Passwörter; Apple-ID, App-spezifisches Passwort beziehungsweise
+ein App-Store-Connect-Schlüssel verbleiben vollständig im Schlüsselbund. Bereits in
+der Shell gesetzte Werte haben durch die Vorgabewerte in `.env` weiterhin Vorrang.
+
+Standardmäßig verwendet das Skript wegen möglicher IPv6-Probleme eine zur Laufzeit
+ermittelte IPv4-Adresse von Apples Zeitstempelserver. Falls nötig, kann der Server
+ohne Änderung am Repository überschrieben werden:
+
+```bash
+SIGNING_TIMESTAMP_URL='http://timestamp.apple.com/ts01' \
+./standalone/release.sh
+```
+
+Die Version stammt aus `CFBundleShortVersionString` in `standalone/Info.plist`. Das
+fertige Archiv liegt anschließend unter
+`dist/release/FluxBar-<Version>-macos-<Architektur>.zip`. Es wird ohne AppleDouble-
+Dateien erzeugt und nach dem Verpacken nochmals extrahiert, signaturgeprüft und von
+Gatekeeper bewertet.
 
 ## SwiftBar
 

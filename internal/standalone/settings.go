@@ -9,11 +9,12 @@ import (
 
 var ErrSettingsNotFound = errors.New("keine Miniflux-Einstellungen gespeichert")
 
-// Settings contains the credentials used by the standalone Miniflux client.
-// Both values are stored as a generic password in the macOS Keychain.
+// Settings contains the standalone Miniflux configuration. It is stored as a
+// generic password in the macOS Keychain.
 type Settings struct {
-	Server string
-	APIKey string
+	Server     string
+	APIKey     string
+	ShowSplash bool
 }
 
 type SettingsEditor interface {
