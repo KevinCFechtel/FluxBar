@@ -37,16 +37,15 @@ Für einen automatischen Start kann `dist/FluxBar.app` nach `/Applications` kopi
 ./swiftbar/build.sh
 ```
 
-Danach `swiftbar/fluxbar.15m.sh` in den SwiftBar-Plugin-Ordner kopieren oder verlinken. Das Binary muss daneben als `fluxbar.cgo` liegen. Alternativ kann das Skript über `FLUXBAR_BINARY` auf einen anderen Pfad zeigen.
+Danach `swiftbar/fluxbar.15m.sh` in den SwiftBar-Plugin-Ordner kopieren oder verlinken. Das Skript sucht das Binary im Ordner `FluxBar` neben dem Plugin-Ordner. Unterstützt werden sowohl `FluxBar/fluxbar.cgo` als auch der Build-Pfad `FluxBar/swiftbar/fluxbar.cgo`. Alternativ kann `FLUXBAR_BINARY` einen anderen Pfad vorgeben.
 
 Beispiel mit symbolischen Links:
 
 ```bash
 ln -s "$PWD/swiftbar/fluxbar.15m.sh" "$HOME/Library/Application Support/SwiftBar/Plugins/fluxbar.15m.sh"
-ln -s "$PWD/swiftbar/fluxbar.cgo" "$HOME/Library/Application Support/SwiftBar/Plugins/fluxbar.cgo"
 ```
 
-SwiftBar erhält für jeden Eintrag ein base64-kodiertes PNG über den Parameter `image=` sowie eine explizite Anzeigegröße von 16 × 16 Punkten.
+SwiftBar erhält für jeden Eintrag ein base64-kodiertes PNG über den Parameter `image=` sowie eine explizite Anzeigegröße von 16 × 16 Punkten. Das monochrome Menüleisten-Logo wird als `templateImage=` ausgegeben, damit macOS es passend zu einer hellen oder dunklen Menüleiste einfärbt.
 
 ## Entwicklung
 

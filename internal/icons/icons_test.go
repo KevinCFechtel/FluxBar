@@ -79,4 +79,15 @@ func TestNormalizeMenuBarAsset(t *testing.T) {
 	if decoded.Bounds() != image.Rect(0, 0, 44, 44) {
 		t.Fatalf("normalized bounds = %v", decoded.Bounds())
 	}
+	nonTransparent := 0
+	for y := decoded.Bounds().Min.Y; y < decoded.Bounds().Max.Y; y++ {
+		for x := decoded.Bounds().Min.X; x < decoded.Bounds().Max.X; x++ {
+			if _, _, _, alpha := decoded.At(x, y).RGBA(); alpha > 0 {
+				nonTransparent++
+			}
+		}
+	}
+	if nonTransparent == 0 {
+		t.Fatal("normalized menu bar asset contains no visible pixels")
+	}
 }

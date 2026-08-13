@@ -8,7 +8,16 @@
 # <xbar.dependencies>bash</xbar.dependencies>
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
-BINARY="${FLUXBAR_BINARY:-${SCRIPT_DIR}/fluxbar.cgo}"
+PLUGIN_DIR="${SWIFTBAR_PLUGINS_PATH:-${SCRIPT_DIR}}"
+FLUXBAR_DIR="$(cd -- "${PLUGIN_DIR}/.." && pwd)/FluxBar"
+
+if [[ -n "${FLUXBAR_BINARY:-}" ]]; then
+  BINARY="${FLUXBAR_BINARY}"
+elif [[ -x "${FLUXBAR_DIR}/fluxbar.cgo" ]]; then
+  BINARY="${FLUXBAR_DIR}/fluxbar.cgo"
+else
+  BINARY="${FLUXBAR_DIR}/swiftbar/fluxbar.cgo"
+fi
 
 if [[ ! -x "${BINARY}" ]]; then
   echo "! | color=red"

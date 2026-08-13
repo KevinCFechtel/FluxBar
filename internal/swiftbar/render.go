@@ -20,7 +20,10 @@ type Options struct {
 func Render(writer io.Writer, entries []model.Entry, total int, options Options) error {
 	title := strconv.Itoa(total)
 	if len(options.TitleIcon) > 0 {
-		title += " | image=" + base64.StdEncoding.EncodeToString(options.TitleIcon)
+		// The menu bar logo is monochrome. templateImage lets macOS tint it for
+		// both light and dark menu bars; image= would keep its white source pixels.
+		title += " | templateImage=" + base64.StdEncoding.EncodeToString(options.TitleIcon)
+		title += " width=16 height=16"
 	}
 	if _, err := fmt.Fprintln(writer, title); err != nil {
 		return err

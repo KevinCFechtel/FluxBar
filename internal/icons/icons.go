@@ -102,7 +102,15 @@ func rasterizeSVG(data []byte, size int) (image.Image, error) {
 	targetHeight := height * scale
 	x := (float64(size) - targetWidth) / 2
 	y := (float64(size) - targetHeight) / 2
-	icon.SetTarget(x, y, targetWidth, targetHeight)
+	// oksvg.SetTarget subtracts the viewBox origin before applying its scale.
+	// With a non-zero origin that translation remains unscaled and can move the
+	// whole drawing outside the canvas. Build the affine transform explicitly.
+	icon.Transform = rasterx.Matrix2D{
+		A: scale,
+		D: scale,
+		E: x - icon.ViewBox.X*scale,
+		F: y - icon.ViewBox.Y*scale,
+	}
 
 	destination := image.NewRGBA(image.Rect(0, 0, size, size))
 	scanner := rasterx.NewScannerGV(size, size, destination, destination.Bounds())
