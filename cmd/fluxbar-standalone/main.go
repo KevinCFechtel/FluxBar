@@ -13,7 +13,7 @@ import (
 
 func main() {
 	logger := applicationLogger()
-	menuIcon, err := icons.Normalize(assets.MinifluxSVG(), "image/svg+xml", 44)
+	menuIcon, err := icons.Normalize(assets.FluxBarTemplateSVG(), "image/svg+xml", 44)
 	if err != nil {
 		logger.Fatalf("Menüleisten-Icon konnte nicht verarbeitet werden: %v", err)
 	}

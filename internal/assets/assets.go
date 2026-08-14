@@ -1,12 +1,17 @@
 package assets
 
-import "encoding/base64"
+// FluxBarTemplateSVG is the symbolic menu bar representation of the app icon.
+// Only the book is opaque so macOS can tint it for both light and dark menu
+// bars while the app icon background remains transparent.
+const fluxBarTemplateSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <path fill="#000" d="M128 274 C128 259 138 247 152 242 C270 198 372 201 450 239
+	C464 244 472 256 472 271 V771 C472 790 462 803 444 797
+	C347 762 259 762 160 796 C144 802 128 790 128 773 Z"/>
+  <path fill="#000" d="M552 271 C552 256 560 244 574 239 C652 201 754 198 872 242
+	C886 247 896 259 896 274 V773 C896 790 880 802 864 796
+	C765 762 677 762 580 797 C562 803 552 790 552 771 Z"/>
+</svg>`
 
-// The Miniflux logo is converted to a template PNG for the macOS menu bar by
-// the icons package.
-const minifluxSVGBase64 = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbDpzcGFjZT0icHJlc2VydmUiIHZpZXdCb3g9IjAgNzguOSA1MTIgMzU0LjEiIHdpZHRoPSIyNHB4IiBoZWlnaHQ9IjI0cHgiPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0xNjYuOCA5Ni4yYzE2LjYtOC44IDM1LjItMTMuMiA1NC0xMy4xIDM5LjkgMCA2NS4yIDE3LjMgNzYuMiA1MiAxMi42LTE0LjggMjcuNy0yNy4zIDQ0LjYtMzYuOSAxNy41LTEwLjEgMzctMTUuMSA1OC42LTE1LjEgMjkuOSAwIDUxLjMgOS4xIDY0LjEgMjcuNHMxOS4zIDQ1LjcgMTkuMiA4Mi4zdjIwNi42YzAgNS4yLjcgOC43IDIuMiAxMC41IDEuNCAxLjkgNC42IDMuNiA5LjQgNC45bDE2LjkgNS42VjQzM0g0MTEuN2MtOC43IDAtMTUtMy4zLTE4LjgtOS44LTMuOC02LjYtNS44LTE2LjQtNS44LTI5LjVWMTgwLjFjMC0yMS4xLTIuMy0zNi4xLTctNDVzLTEyLjUtMTMuMy0yMy40LTEzLjRjLTE3LjQgMC0zNS44IDEwLjMtNTUuNCAzMC45IDIuMSAxMy4zIDMgMjYuNyAyLjkgNDAuMXYyMDYuNmMwIDUuMi43IDguNyAyLjIgMTAuNXM0LjYgMy42IDkuNCA0LjlsMTYuOSA1LjZ2MTIuNkgyMzIuNGMtOC43IDAtMTUtMy4zLTE4LjgtOS44cy01LjgtMTYuNC01LjgtMjkuNVYxODAuMWMwLTIxLjEtMi4zLTM2LjEtNy00NXMtMTIuNC0xMy4zLTIzLjQtMTMuNGMtMTcgMC0zNC42IDkuNC01Mi41IDI4LjF2MjQ5LjRjMCA1LjIuNyA4LjggMi4yIDEwLjkgMS40IDIuMSA0LjQgMy45IDguOSA1LjNsMTYuNCA0Ljl2MTIuNkgwdi0xMi42bDE2LjktNS42YzQuOC0xLjQgOC0zIDkuNC00LjlzMi4yLTUuNCAyLjItMTAuNVYxMzMuN2MwLTUuMi0uNy04LjctMi4yLTEwLjUtMS40LTEuOS00LjYtMy41LTkuNC00LjlMMCAxMTIuN1YxMDBsMTE1LjctMjEuMWg4LjJ2NDkuMmMxMi41LTEyLjggMjctMjMuNiA0Mi45LTMxLjkiLz48L3N2Zz4="
-
-func MinifluxSVG() []byte {
-	data, _ := base64.StdEncoding.DecodeString(minifluxSVGBase64)
-	return data
+func FluxBarTemplateSVG() []byte {
+	return []byte(fluxBarTemplateSVG)
 }
