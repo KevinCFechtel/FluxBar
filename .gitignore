@@ -28,7 +28,6 @@ go.work.sum
 
 # env file
 *.env
-!miniflux.env.example
 .codex-context/
 
 # Editor/IDE
@@ -42,3 +41,4 @@ go.work.sum
 *.p12
 *.pem
 *.key
+AGENTS.md

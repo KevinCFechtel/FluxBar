@@ -13,6 +13,7 @@ void fluxbar_reset_article_hover(void);
 void fluxbar_register_article_hover(
     const char *title,
     const char *feed,
+    long long published_unix,
     const char *preview,
     const char *image_url,
     const unsigned char *fallback_icon,
@@ -50,9 +51,14 @@ func registerArticleHover(entry model.Entry) {
 	if len(entry.Icon) > 0 {
 		iconPointer = (*C.uchar)(unsafe.Pointer(&entry.Icon[0]))
 	}
+	var publishedUnix C.longlong
+	if !entry.PublishedAt.IsZero() {
+		publishedUnix = C.longlong(entry.PublishedAt.Unix())
+	}
 	C.fluxbar_register_article_hover(
 		title,
 		feed,
+		publishedUnix,
 		preview,
 		imageURL,
 		iconPointer,

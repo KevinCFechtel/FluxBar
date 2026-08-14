@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	miniflux "miniflux.app/v2/client"
 )
@@ -25,9 +26,12 @@ type fakeClient struct {
 	iconCalls   map[int64]int
 	updatedIDs  []int64
 	updatedWith string
+	lastFilter  *miniflux.Filter
 }
 
-func (client *fakeClient) EntriesContext(context.Context, *miniflux.Filter) (*miniflux.EntryResultSet, error) {
+func (client *fakeClient) EntriesContext(_ context.Context, filter *miniflux.Filter) (*miniflux.EntryResultSet, error) {
+	filterCopy := *filter
+	client.lastFilter = &filterCopy
 	return client.entries, nil
 }
 
@@ -73,6 +77,9 @@ func TestUnreadLoadsEachFeedIconOnceAndCachesIt(t *testing.T) {
 	if client.iconCalls[7] != 1 {
 		t.Fatalf("FeedIconContext called %d times", client.iconCalls[7])
 	}
+	if client.lastFilter == nil || client.lastFilter.Order != "published_at" || client.lastFilter.Direction != "asc" {
+		t.Fatalf("default filter = %#v", client.lastFilter)
+	}
 }
 
 func TestMarkRead(t *testing.T) {
@@ -83,6 +90,27 @@ func TestMarkRead(t *testing.T) {
 	}
 	if len(client.updatedIDs) != 2 || client.updatedIDs[0] != 3 || client.updatedWith != miniflux.EntryStatusRead {
 		t.Fatalf("unexpected update: %#v %q", client.updatedIDs, client.updatedWith)
+	}
+}
+
+func TestUnreadUsesConfiguredSortOrderAndPublishedDate(t *testing.T) {
+	publishedAt := time.Date(2026, time.August, 14, 8, 30, 0, 0, time.UTC)
+	client := &fakeClient{
+		entries: &miniflux.EntryResultSet{Total: 1, Entries: miniflux.Entries{
+			{ID: 10, Date: publishedAt},
+		}},
+		iconCalls: make(map[int64]int),
+	}
+	service := newWithClient(client, SortNewestFirst, nil)
+	entries, _, err := service.Unread(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.lastFilter == nil || client.lastFilter.Order != "published_at" || client.lastFilter.Direction != "desc" {
+		t.Fatalf("filter = %#v", client.lastFilter)
+	}
+	if len(entries) != 1 || !entries[0].PublishedAt.Equal(publishedAt) {
+		t.Fatalf("entries = %#v", entries)
 	}
 }
 

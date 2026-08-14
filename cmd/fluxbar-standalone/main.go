@@ -19,7 +19,11 @@ func main() {
 	}
 	standalone.NewConfigured(
 		func(settings standalone.Settings) standalone.Reader {
-			return fluxminiflux.New(settings.Server, settings.APIKey, logger)
+			sortOrder := fluxminiflux.SortOldestFirst
+			if settings.NewestFirst {
+				sortOrder = fluxminiflux.SortNewestFirst
+			}
+			return fluxminiflux.NewWithSortOrder(settings.Server, settings.APIKey, sortOrder, logger)
 		},
 		standalone.NewNativeSettings(),
 		logger,

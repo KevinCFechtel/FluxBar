@@ -12,9 +12,11 @@ var ErrSettingsNotFound = errors.New("keine Miniflux-Einstellungen gespeichert")
 // Settings contains the standalone Miniflux configuration. It is stored as a
 // generic password in the macOS Keychain.
 type Settings struct {
-	Server     string
-	APIKey     string
-	ShowSplash bool
+	Server        string
+	APIKey        string
+	ShowSplash    bool
+	LaunchAtLogin bool
+	NewestFirst   bool
 }
 
 type SettingsEditor interface {

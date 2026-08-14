@@ -30,4 +30,4 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "${APP_DIR}"
 fi
 
-echo "Standalone-App erstellt: ${APP_DIR}"
+echo "FluxBar-App erstellt: ${APP_DIR}"

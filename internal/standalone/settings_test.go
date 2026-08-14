@@ -4,14 +4,17 @@ import "testing"
 
 func TestValidateSettings(t *testing.T) {
 	got, err := validateSettings(Settings{
-		Server:     " https://miniflux.example.com/ ",
-		APIKey:     " secret ",
-		ShowSplash: true,
+		Server:        " https://miniflux.example.com/ ",
+		APIKey:        " secret ",
+		ShowSplash:    true,
+		LaunchAtLogin: true,
+		NewestFirst:   true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Server != "https://miniflux.example.com" || got.APIKey != "secret" || !got.ShowSplash {
+	if got.Server != "https://miniflux.example.com" || got.APIKey != "secret" ||
+		!got.ShowSplash || !got.LaunchAtLogin || !got.NewestFirst {
 		t.Fatalf("validateSettings() = %#v", got)
 	}
 }

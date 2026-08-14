@@ -2,6 +2,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <Security/Security.h>
+#import <ServiceManagement/ServiceManagement.h>
 #import <dispatch/dispatch.h>
 #import <stdbool.h>
 #import <stdlib.h>
@@ -69,10 +70,71 @@ static OSStatus fluxbar_write_keychain_value(NSString *service, NSString *accoun
     return status;
 }
 
-int fluxbar_load_settings(char **server, char **apiKey, bool *showSplash, char **errorMessage) {
+static bool fluxbar_login_item_supported(void) {
+    if (@available(macOS 13.0, *)) {
+        return true;
+    }
+    return false;
+}
+
+static bool fluxbar_launch_at_login_enabled(void) {
+    if (@available(macOS 13.0, *)) {
+        return SMAppService.mainAppService.status == SMAppServiceStatusEnabled;
+    }
+    return false;
+}
+
+static bool fluxbar_update_launch_at_login(bool enabled, NSString **errorMessage) {
+    if (@available(macOS 13.0, *)) {
+        SMAppService *service = SMAppService.mainAppService;
+        SMAppServiceStatus status = service.status;
+        if (enabled && status == SMAppServiceStatusEnabled) {
+            return true;
+        }
+        if (!enabled && (status == SMAppServiceStatusNotRegistered || status == SMAppServiceStatusNotFound)) {
+            return true;
+        }
+        if (enabled && status == SMAppServiceStatusRequiresApproval) {
+            [SMAppService openSystemSettingsLoginItems];
+            *errorMessage = @"FluxBar wurde in den macOS-Anmeldeobjekten deaktiviert. Bitte dort erneut erlauben.";
+            return false;
+        }
+
+        NSError *error = nil;
+        bool succeeded = enabled
+            ? [service registerAndReturnError:&error]
+            : [service unregisterAndReturnError:&error];
+        if (!succeeded) {
+            *errorMessage = error.localizedDescription ?: @"Das Anmeldeobjekt konnte nicht geändert werden.";
+            return false;
+        }
+        if (enabled && service.status == SMAppServiceStatusRequiresApproval) {
+            [SMAppService openSystemSettingsLoginItems];
+            *errorMessage = @"Bitte FluxBar in den macOS-Anmeldeobjekten erlauben.";
+            return false;
+        }
+        return true;
+    }
+    if (enabled) {
+        *errorMessage = @"Automatischer Start wird ab macOS 13 unterstützt.";
+        return false;
+    }
+    return true;
+}
+
+int fluxbar_load_settings(
+    char **server,
+    char **apiKey,
+    bool *showSplash,
+    bool *launchAtLogin,
+    bool *newestFirst,
+    char **errorMessage
+) {
     *server = NULL;
     *apiKey = NULL;
     *showSplash = true;
+    *launchAtLogin = fluxbar_launch_at_login_enabled();
+    *newestFirst = false;
     *errorMessage = NULL;
 
     NSString *storedJSON = nil;
@@ -103,6 +165,7 @@ int fluxbar_load_settings(char **server, char **apiKey, bool *showSplash, char *
     NSString *storedServer = [credentials[@"server"] isKindOfClass:[NSString class]] ? credentials[@"server"] : nil;
     NSString *storedAPIKey = [credentials[@"apiKey"] isKindOfClass:[NSString class]] ? credentials[@"apiKey"] : nil;
     NSNumber *storedShowSplash = [credentials[@"showSplash"] isKindOfClass:[NSNumber class]] ? credentials[@"showSplash"] : nil;
+    NSNumber *storedNewestFirst = [credentials[@"newestFirst"] isKindOfClass:[NSNumber class]] ? credentials[@"newestFirst"] : nil;
     if (storedServer == nil || storedAPIKey == nil) {
         *errorMessage = fluxbar_copy_utf8(@"Die gespeicherten Zugangsdaten sind beschädigt.");
         return -1;
@@ -115,17 +178,36 @@ int fluxbar_load_settings(char **server, char **apiKey, bool *showSplash, char *
     *server = fluxbar_copy_utf8(storedServer);
     *apiKey = fluxbar_copy_utf8(storedAPIKey);
     *showSplash = storedShowSplash == nil ? true : storedShowSplash.boolValue;
+    *newestFirst = storedNewestFirst == nil ? false : storedNewestFirst.boolValue;
     return 1;
 }
 
-bool fluxbar_save_settings(const char *serverValue, const char *apiKeyValue, bool showSplash, char **errorMessage) {
+bool fluxbar_save_settings(
+    const char *serverValue,
+    const char *apiKeyValue,
+    bool showSplash,
+    bool launchAtLogin,
+    bool newestFirst,
+    char **errorMessage
+) {
     *errorMessage = NULL;
+    __block NSString *loginError = nil;
+    __block bool loginUpdated = false;
+    fluxbar_settings_main_sync(^{
+        loginUpdated = fluxbar_update_launch_at_login(launchAtLogin, &loginError);
+    });
+    if (!loginUpdated) {
+        *errorMessage = fluxbar_copy_utf8(loginError);
+        return false;
+    }
+
     NSString *server = [NSString stringWithUTF8String:serverValue ?: ""] ?: @"";
     NSString *apiKey = [NSString stringWithUTF8String:apiKeyValue ?: ""] ?: @"";
     NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@{
         @"server": server,
         @"apiKey": apiKey,
         @"showSplash": @(showSplash),
+        @"newestFirst": @(newestFirst),
     }
                                                        options:0
                                                          error:nil];
@@ -190,16 +272,23 @@ int fluxbar_prompt_settings(
     const char *serverValue,
     const char *apiKeyValue,
     bool showSplashValue,
+    bool launchAtLoginValue,
+    bool newestFirstValue,
     const char *validationValue,
     char **savedServer,
     char **savedAPIKey,
-    bool *savedShowSplash
+    bool *savedShowSplash,
+    bool *savedLaunchAtLogin,
+    bool *savedNewestFirst
 ) {
     *savedServer = NULL;
     *savedAPIKey = NULL;
     *savedShowSplash = showSplashValue;
+    *savedLaunchAtLogin = launchAtLoginValue;
+    *savedNewestFirst = newestFirstValue;
     __block int result = -1;
     fluxbar_settings_main_sync(^{
+        bool currentLaunchAtLogin = fluxbar_launch_at_login_enabled();
         NSString *server = [NSString stringWithUTF8String:serverValue ?: ""] ?: @"";
         NSString *apiKey = [NSString stringWithUTF8String:apiKeyValue ?: ""] ?: @"";
         NSString *validation = [NSString stringWithUTF8String:validationValue ?: ""] ?: @"";
@@ -211,15 +300,30 @@ int fluxbar_prompt_settings(
         [alert addButtonWithTitle:@"Abbrechen"];
 
         CGFloat validationHeight = validation.length > 0 ? 34 : 0;
-        NSView *form = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 430, 140 + validationHeight)];
-        NSTextField *serverLabel = fluxbar_settings_label(@"Miniflux-Server", NSMakeRect(0, 110 + validationHeight, 125, 22));
-        NSTextField *serverField = [[NSTextField alloc] initWithFrame:NSMakeRect(130, 108 + validationHeight, 300, 24)];
+        NSView *form = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 430, 212 + validationHeight)];
+        NSTextField *serverLabel = fluxbar_settings_label(@"Miniflux-Server", NSMakeRect(0, 182 + validationHeight, 125, 22));
+        NSTextField *serverField = [[NSTextField alloc] initWithFrame:NSMakeRect(130, 180 + validationHeight, 300, 24)];
         serverField.stringValue = server;
         serverField.placeholderString = @"https://miniflux.example.com";
-        NSTextField *keyLabel = fluxbar_settings_label(@"API-Key", NSMakeRect(0, 74 + validationHeight, 125, 22));
-        NSSecureTextField *keyField = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(130, 72 + validationHeight, 300, 24)];
+        NSTextField *keyLabel = fluxbar_settings_label(@"API-Key", NSMakeRect(0, 146 + validationHeight, 125, 22));
+        NSSecureTextField *keyField = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(130, 144 + validationHeight, 300, 24)];
         keyField.stringValue = apiKey;
         keyField.placeholderString = @"Miniflux API-Key";
+        NSTextField *sortLabel = fluxbar_settings_label(@"Sortierung", NSMakeRect(0, 110 + validationHeight, 125, 22));
+        NSPopUpButton *sortButton = [[NSPopUpButton alloc]
+            initWithFrame:NSMakeRect(130, 106 + validationHeight, 220, 28)
+                pullsDown:NO];
+        [sortButton addItemsWithTitles:@[@"Neueste zuerst", @"Älteste zuerst"]];
+        [sortButton selectItemAtIndex:newestFirstValue ? 0 : 1];
+        NSButton *launchAtLoginButton = [NSButton checkboxWithTitle:@"Beim Anmelden automatisch starten"
+                                                             target:nil
+                                                             action:nil];
+        launchAtLoginButton.frame = NSMakeRect(130, 70 + validationHeight, 300, 24);
+        launchAtLoginButton.state = currentLaunchAtLogin ? NSControlStateValueOn : NSControlStateValueOff;
+        launchAtLoginButton.enabled = fluxbar_login_item_supported();
+        if (!launchAtLoginButton.enabled) {
+            launchAtLoginButton.toolTip = @"Diese Option wird ab macOS 13 unterstützt.";
+        }
         NSButton *showSplashButton = [NSButton checkboxWithTitle:@"Startanzeige beim Öffnen anzeigen"
                                                           target:nil
                                                           action:nil];
@@ -229,6 +333,9 @@ int fluxbar_prompt_settings(
         [form addSubview:serverField];
         [form addSubview:keyLabel];
         [form addSubview:keyField];
+        [form addSubview:sortLabel];
+        [form addSubview:sortButton];
+        [form addSubview:launchAtLoginButton];
         [form addSubview:showSplashButton];
         if (validation.length > 0) {
             NSTextField *validationLabel = fluxbar_settings_label(validation, NSMakeRect(0, 0, 430, 30));
@@ -247,6 +354,8 @@ int fluxbar_prompt_settings(
             *savedServer = fluxbar_copy_utf8(serverField.stringValue);
             *savedAPIKey = fluxbar_copy_utf8(keyField.stringValue);
             *savedShowSplash = showSplashButton.state == NSControlStateValueOn;
+            *savedLaunchAtLogin = launchAtLoginButton.state == NSControlStateValueOn;
+            *savedNewestFirst = sortButton.indexOfSelectedItem == 0;
             result = 1;
         } else {
             result = 0;

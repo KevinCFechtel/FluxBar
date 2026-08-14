@@ -18,6 +18,8 @@ typedef struct {
     CGFloat imageHeight;
     CGFloat titleHeight;
     CGFloat feedHeight;
+    CGFloat feedWidth;
+    CGFloat dateWidth;
     CGFloat previewHeight;
     bool previewScrolls;
 } FluxBarPreviewLayout;
@@ -26,6 +28,7 @@ typedef struct {
 @property(nonatomic, copy) NSString *title;
 @property(nonatomic, copy) NSString *feed;
 @property(nonatomic, copy) NSString *preview;
+@property(nonatomic, strong) NSDate *publishedAt;
 @property(nonatomic, strong) NSURL *imageURL;
 @property(nonatomic, strong) NSData *fallbackIcon;
 @end
@@ -141,6 +144,21 @@ static CGFloat fluxbar_measured_text_height(NSString *text, NSFont *font, CGFloa
     return ceil(bounds.size.height);
 }
 
+static NSString *fluxbar_published_date(NSDate *date) {
+    if (date == nil) {
+        return @"";
+    }
+    static NSDateFormatter *formatter;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        formatter = [[NSDateFormatter alloc] init];
+        formatter.dateStyle = NSDateFormatterShortStyle;
+        formatter.timeStyle = NSDateFormatterShortStyle;
+        formatter.doesRelativeDateFormatting = YES;
+    });
+    return [formatter stringFromDate:date];
+}
+
 static FluxBarPreviewLayout fluxbar_preview_layout(
     FluxBarArticlePreview *article,
     bool hasImage,
@@ -149,6 +167,8 @@ static FluxBarPreviewLayout fluxbar_preview_layout(
     NSFont *titleFont = [NSFont boldSystemFontOfSize:15];
     NSFont *feedFont = [NSFont systemFontOfSize:12];
     NSFont *previewFont = [NSFont systemFontOfSize:13];
+    NSString *publishedDate = fluxbar_published_date(article.publishedAt);
+    bool hasMetadata = article.feed.length > 0 || publishedDate.length > 0;
     NSString *previewText = article.preview.length > 0
         ? article.preview
         : @"Keine Textvorschau verfügbar.";
@@ -165,19 +185,31 @@ static FluxBarPreviewLayout fluxbar_preview_layout(
             fluxbar_measured_text_height(article.title, titleFont, contentWidth),
             ceil(titleFont.pointSize * 1.25 * 3)
         );
-        CGFloat feedHeight = article.feed.length > 0
+        CGFloat measuredDateWidth = publishedDate.length > 0
+            ? ceil([publishedDate sizeWithAttributes:@{NSFontAttributeName: feedFont}].width)
+            : 0;
+        CGFloat dateWidth = MIN(measuredDateWidth, floor(contentWidth * 0.46));
+        CGFloat metadataGap = article.feed.length > 0 && publishedDate.length > 0 ? 12 : 0;
+        CGFloat feedWidth = article.feed.length > 0
+            ? MAX(0, contentWidth - dateWidth - metadataGap)
+            : 0;
+        CGFloat measuredFeedHeight = article.feed.length > 0
             ? MIN(
-                fluxbar_measured_text_height(article.feed, feedFont, contentWidth),
+                fluxbar_measured_text_height(article.feed, feedFont, feedWidth),
                 ceil(feedFont.pointSize * 1.25 * 2)
             )
             : 0;
+        CGFloat dateHeight = publishedDate.length > 0
+            ? fluxbar_measured_text_height(publishedDate, feedFont, dateWidth)
+            : 0;
+        CGFloat feedHeight = MAX(measuredFeedHeight, dateHeight);
         CGFloat measuredPreviewHeight = fluxbar_measured_text_height(
             previewText,
             previewFont,
             contentWidth
         ) + 8;
         CGFloat previewHeight = MAX(26, measuredPreviewHeight);
-        NSUInteger arrangedViews = 2 + (hasImage ? 1 : 0) + (article.feed.length > 0 ? 1 : 0);
+        NSUInteger arrangedViews = 2 + (hasImage ? 1 : 0) + (hasMetadata ? 1 : 0);
         CGFloat fixedHeight = 2 * FluxBarPreviewVerticalPadding + imageHeight + titleHeight + feedHeight +
             FluxBarPreviewSpacing * (arrangedViews - 1);
         CGFloat naturalHeight = fixedHeight + previewHeight;
@@ -188,6 +220,8 @@ static FluxBarPreviewLayout fluxbar_preview_layout(
         selected.imageHeight = imageHeight;
         selected.titleHeight = titleHeight;
         selected.feedHeight = feedHeight;
+        selected.feedWidth = feedWidth;
+        selected.dateWidth = dateWidth;
         selected.previewHeight = MAX(26, selected.height - fixedHeight);
         selected.previewScrolls = measuredPreviewHeight > selected.previewHeight + 1;
 
@@ -298,17 +332,44 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
     [titleLabel.heightAnchor constraintEqualToConstant:layout.titleHeight].active = YES;
     [titleLabel.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
     [stack addArrangedSubview:titleLabel];
-    if (article.feed.length > 0) {
-        NSTextField *feedLabel = fluxbar_label(
-            article.feed,
-            [NSFont systemFontOfSize:12],
-            NSColor.secondaryLabelColor
-        );
-        feedLabel.maximumNumberOfLines = 2;
-        feedLabel.lineBreakMode = NSLineBreakByTruncatingTail;
-        [feedLabel.heightAnchor constraintEqualToConstant:layout.feedHeight].active = YES;
-        [feedLabel.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
-        [stack addArrangedSubview:feedLabel];
+    NSString *publishedDate = fluxbar_published_date(article.publishedAt);
+    if (article.feed.length > 0 || publishedDate.length > 0) {
+        NSView *metadataView = [[NSView alloc] init];
+        metadataView.translatesAutoresizingMaskIntoConstraints = NO;
+        [metadataView.heightAnchor constraintEqualToConstant:layout.feedHeight].active = YES;
+        [metadataView.widthAnchor constraintEqualToConstant:layout.contentWidth].active = YES;
+
+        if (article.feed.length > 0) {
+            NSTextField *feedLabel = fluxbar_label(
+                article.feed,
+                [NSFont systemFontOfSize:12],
+                NSColor.secondaryLabelColor
+            );
+            feedLabel.maximumNumberOfLines = 2;
+            feedLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+            feedLabel.translatesAutoresizingMaskIntoConstraints = NO;
+            [metadataView addSubview:feedLabel];
+            [NSLayoutConstraint activateConstraints:@[
+                [feedLabel.leadingAnchor constraintEqualToAnchor:metadataView.leadingAnchor],
+                [feedLabel.topAnchor constraintEqualToAnchor:metadataView.topAnchor],
+                [feedLabel.widthAnchor constraintEqualToConstant:layout.feedWidth]
+            ]];
+        }
+        if (publishedDate.length > 0) {
+            NSTextField *dateLabel = [NSTextField labelWithString:publishedDate];
+            dateLabel.font = [NSFont systemFontOfSize:12];
+            dateLabel.textColor = NSColor.secondaryLabelColor;
+            dateLabel.alignment = NSTextAlignmentRight;
+            dateLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+            dateLabel.translatesAutoresizingMaskIntoConstraints = NO;
+            [metadataView addSubview:dateLabel];
+            [NSLayoutConstraint activateConstraints:@[
+                [dateLabel.trailingAnchor constraintEqualToAnchor:metadataView.trailingAnchor],
+                [dateLabel.topAnchor constraintEqualToAnchor:metadataView.topAnchor],
+                [dateLabel.widthAnchor constraintEqualToConstant:layout.dateWidth]
+            ]];
+        }
+        [stack addArrangedSubview:metadataView];
     }
 
     NSScrollView *scrollView = [[NSScrollView alloc] init];
@@ -450,6 +511,7 @@ void fluxbar_reset_article_hover(void) {
 void fluxbar_register_article_hover(
     const char *titleValue,
     const char *feedValue,
+    long long publishedUnix,
     const char *previewValue,
     const char *imageURLValue,
     const unsigned char *fallbackIconBytes,
@@ -458,6 +520,9 @@ void fluxbar_register_article_hover(
     FluxBarArticlePreview *article = [[FluxBarArticlePreview alloc] init];
     article.title = fluxbar_string(titleValue);
     article.feed = fluxbar_string(feedValue);
+    article.publishedAt = publishedUnix > 0
+        ? [NSDate dateWithTimeIntervalSince1970:(NSTimeInterval)publishedUnix]
+        : nil;
     article.preview = fluxbar_string(previewValue);
     article.imageURL = fluxbar_http_url(fluxbar_string(imageURLValue));
     article.fallbackIcon = fallbackIconLength > 0

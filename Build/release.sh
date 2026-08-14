@@ -77,7 +77,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "1/8 Standalone-App bauen"
+echo "1/8 FluxBar-App bauen"
 GOARCH="${RELEASE_ARCH}" "${SCRIPT_DIR}/build.sh"
 
 echo "2/8 Mit Developer ID und Hardened Runtime signieren"

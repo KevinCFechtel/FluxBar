@@ -19,6 +19,13 @@ import (
 
 const iconWorkers = 6
 
+type SortOrder string
+
+const (
+	SortOldestFirst SortOrder = "oldest_first"
+	SortNewestFirst SortOrder = "newest_first"
+)
+
 type client interface {
 	EntriesContext(context.Context, *miniflux.Filter) (*miniflux.EntryResultSet, error)
 	UpdateEntriesContext(context.Context, []int64, string) error
@@ -33,6 +40,7 @@ type logger interface {
 type Service struct {
 	client client
 	logger logger
+	sort   SortOrder
 
 	iconMu    sync.RWMutex
 	iconCache map[int64]cachedIcon
@@ -50,16 +58,28 @@ type cachedIcon struct {
 }
 
 func New(server, apiKey string, logger *log.Logger) *Service {
-	return NewWithClient(miniflux.NewClient(server, apiKey), logger)
+	return NewWithSortOrder(server, apiKey, SortOldestFirst, logger)
+}
+
+func NewWithSortOrder(server, apiKey string, sort SortOrder, logger *log.Logger) *Service {
+	return newWithClient(miniflux.NewClient(server, apiKey), sort, logger)
 }
 
 func NewWithClient(client client, logger logger) *Service {
+	return newWithClient(client, SortOldestFirst, logger)
+}
+
+func newWithClient(client client, sort SortOrder, logger logger) *Service {
 	if logger == nil {
 		logger = log.Default()
+	}
+	if sort != SortNewestFirst {
+		sort = SortOldestFirst
 	}
 	service := &Service{
 		client:           client,
 		logger:           logger,
+		sort:             sort,
 		iconCache:        make(map[int64]cachedIcon),
 		debugIcons:       environmentEnabled("FLUXBAR_DEBUG_ICONS"),
 		dumpFailedIcons:  environmentEnabled("FLUXBAR_DUMP_FAILED_ICONS"),
@@ -76,12 +96,16 @@ func NewWithClient(client client, logger logger) *Service {
 	return service
 }
 
-// Unread returns all unread entries ordered from oldest to newest.
+// Unread returns all unread entries in the configured publication order.
 func (service *Service) Unread(ctx context.Context) ([]model.Entry, int, error) {
+	direction := "asc"
+	if service.sort == SortNewestFirst {
+		direction = "desc"
+	}
 	result, err := service.client.EntriesContext(ctx, &miniflux.Filter{
 		Status:    miniflux.EntryStatusUnread,
 		Order:     "published_at",
-		Direction: "asc",
+		Direction: direction,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("ungelesene Miniflux-Einträge laden: %w", err)
@@ -106,13 +130,14 @@ func (service *Service) Unread(ctx context.Context) ([]model.Entry, int, error) 
 		}
 		preview := article.Extract(source.Content, source.URL, article.PreviewLimit)
 		entries = append(entries, model.Entry{
-			ID:       source.ID,
-			Title:    source.Title,
-			URL:      source.URL,
-			FeedID:   feedID,
-			FeedName: feedName,
-			Preview:  preview.Text,
-			ImageURL: preview.ImageURL,
+			ID:          source.ID,
+			Title:       source.Title,
+			URL:         source.URL,
+			FeedID:      feedID,
+			FeedName:    feedName,
+			PublishedAt: source.Date,
+			Preview:     preview.Text,
+			ImageURL:    preview.ImageURL,
 		})
 		if feedID > 0 {
 			feedEntries[feedID] = append(feedEntries[feedID], len(entries)-1)
