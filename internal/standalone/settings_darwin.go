@@ -60,7 +60,11 @@ func loadNativeSettings() (Settings, bool, error) {
 	defer freeCString(apiKey)
 	defer freeCString(errorMessage)
 	if status < 0 {
-		return Settings{}, false, fmt.Errorf("Einstellungen aus dem Schlüsselbund laden: %s", goString(errorMessage))
+		return Settings{}, false, fmt.Errorf("%s", localizedFormat(
+			"error.load_settings_format",
+			"Load settings from the Keychain: %s",
+			goString(errorMessage),
+		))
 	}
 	if status == 0 {
 		return Settings{}, false, nil
@@ -89,7 +93,11 @@ func saveNativeSettings(settings Settings) error {
 		C.bool(settings.NewestFirst),
 		&errorMessage,
 	)) {
-		return fmt.Errorf("Einstellungen im Schlüsselbund speichern: %s", goString(errorMessage))
+		return fmt.Errorf("%s", localizedFormat(
+			"error.save_settings_format",
+			"Save settings to the Keychain: %s",
+			goString(errorMessage),
+		))
 	}
 	return nil
 }
@@ -119,7 +127,10 @@ func promptNativeSettings(current Settings, validationMessage string) (Settings,
 	defer freeCString(savedServer)
 	defer freeCString(savedAPIKey)
 	if status < 0 {
-		return Settings{}, false, fmt.Errorf("Einstellungsfenster konnte nicht geöffnet werden")
+		return Settings{}, false, fmt.Errorf("%s", localized(
+			"error.open_settings",
+			"The settings window could not be opened.",
+		))
 	}
 	if status == 0 {
 		return Settings{}, false, nil

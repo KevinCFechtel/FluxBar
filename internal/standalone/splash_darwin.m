@@ -2,6 +2,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <dispatch/dispatch.h>
+#import "localization_darwin.h"
 
 static NSPanel *fluxbarSplashPanel;
 
@@ -42,8 +43,10 @@ void fluxbar_show_startup_splash(void) {
         title.font = [NSFont systemFontOfSize:26 weight:NSFontWeightSemibold];
         [background addSubview:title];
 
-        NSTextField *message = [NSTextField wrappingLabelWithString:
-            @"FluxBar läuft jetzt in der Menüleiste und lädt deine ungelesenen Artikel."];
+        NSTextField *message = [NSTextField wrappingLabelWithString:FluxBarLocalized(
+            @"splash.message",
+            @"FluxBar is now running in the menu bar and loading your unread articles."
+        )];
         message.frame = NSMakeRect(136, 43, 226, 44);
         message.font = [NSFont systemFontOfSize:13];
         message.textColor = NSColor.secondaryLabelColor;

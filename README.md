@@ -11,6 +11,7 @@ The project is released under the BSD 3-Clause License. Contributions, bug repor
 - Sorting by newest or oldest articles
 - Open articles in the default browser and mark them as read
 - Support for macOS light and dark appearances
+- English and German localization based on the system or per-app language
 - Optional launch at login
 - Optional startup notification
 - Native settings for the server URL and API key

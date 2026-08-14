@@ -7,6 +7,7 @@
 #import <stdbool.h>
 #import <stdlib.h>
 #import <string.h>
+#import "localization_darwin.h"
 
 static NSString *const FluxBarKeychainService = @"dev.kevincfechtel.FluxBar.miniflux";
 static NSString *const FluxBarLegacyKeychainService = @"com.kevinfechtel.FluxBar.miniflux";
@@ -27,7 +28,9 @@ static char *fluxbar_copy_utf8(NSString *value) {
 
 static NSString *fluxbar_keychain_error(OSStatus status) {
     CFStringRef message = SecCopyErrorMessageString(status, NULL);
-    return CFBridgingRelease(message) ?: [NSString stringWithFormat:@"Keychain-Fehler %d", (int)status];
+    return CFBridgingRelease(message) ?: [NSString
+        stringWithFormat:FluxBarLocalized(@"error.keychain_format", @"Keychain error %d"),
+                         (int)status];
 }
 
 static OSStatus fluxbar_read_keychain_value(NSString *service, NSString *account, NSString **value) {
@@ -96,7 +99,10 @@ static bool fluxbar_update_launch_at_login(bool enabled, NSString **errorMessage
         }
         if (enabled && status == SMAppServiceStatusRequiresApproval) {
             [SMAppService openSystemSettingsLoginItems];
-            *errorMessage = @"FluxBar wurde in den macOS-Anmeldeobjekten deaktiviert. Bitte dort erneut erlauben.";
+            *errorMessage = FluxBarLocalized(
+                @"error.login_item_disabled",
+                @"FluxBar was disabled in macOS Login Items. Please allow it there again."
+            );
             return false;
         }
 
@@ -105,18 +111,27 @@ static bool fluxbar_update_launch_at_login(bool enabled, NSString **errorMessage
             ? [service registerAndReturnError:&error]
             : [service unregisterAndReturnError:&error];
         if (!succeeded) {
-            *errorMessage = error.localizedDescription ?: @"Das Anmeldeobjekt konnte nicht geändert werden.";
+            *errorMessage = error.localizedDescription ?: FluxBarLocalized(
+                @"error.login_item_change_failed",
+                @"The login item could not be changed."
+            );
             return false;
         }
         if (enabled && service.status == SMAppServiceStatusRequiresApproval) {
             [SMAppService openSystemSettingsLoginItems];
-            *errorMessage = @"Bitte FluxBar in den macOS-Anmeldeobjekten erlauben.";
+            *errorMessage = FluxBarLocalized(
+                @"error.login_item_approval",
+                @"Please allow FluxBar in macOS Login Items."
+            );
             return false;
         }
         return true;
     }
     if (enabled) {
-        *errorMessage = @"Automatischer Start wird ab macOS 13 unterstützt.";
+        *errorMessage = FluxBarLocalized(
+            @"error.login_item_unsupported",
+            @"Launch at login requires macOS 13 or later."
+        );
         return false;
     }
     return true;
@@ -167,7 +182,10 @@ int fluxbar_load_settings(
     NSNumber *storedShowSplash = [credentials[@"showSplash"] isKindOfClass:[NSNumber class]] ? credentials[@"showSplash"] : nil;
     NSNumber *storedNewestFirst = [credentials[@"newestFirst"] isKindOfClass:[NSNumber class]] ? credentials[@"newestFirst"] : nil;
     if (storedServer == nil || storedAPIKey == nil) {
-        *errorMessage = fluxbar_copy_utf8(@"Die gespeicherten Zugangsdaten sind beschädigt.");
+        *errorMessage = fluxbar_copy_utf8(FluxBarLocalized(
+            @"error.credentials_corrupt",
+            @"The stored credentials are corrupted."
+        ));
         return -1;
     }
     if (loadedLegacySettings) {
@@ -213,7 +231,10 @@ bool fluxbar_save_settings(
                                                          error:nil];
     NSString *json = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
     if (json == nil) {
-        *errorMessage = fluxbar_copy_utf8(@"Die Zugangsdaten konnten nicht serialisiert werden.");
+        *errorMessage = fluxbar_copy_utf8(FluxBarLocalized(
+            @"error.credentials_serialize",
+            @"The credentials could not be serialized."
+        ));
         return false;
     }
     OSStatus status = fluxbar_write_keychain_value(FluxBarKeychainService, FluxBarCredentialsAccount, json);
@@ -253,17 +274,18 @@ static void fluxbar_install_edit_menu(void) {
         }
     }
 
-    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:@"Bearbeiten"];
+    NSString *editTitle = FluxBarLocalized(@"edit.menu", @"Edit");
+    NSMenu *editMenu = [[NSMenu alloc] initWithTitle:editTitle];
     editMenu.identifier = @"FluxBarEditMenu";
-    [editMenu addItem:fluxbar_edit_menu_item(@"Widerrufen", @selector(undo:), @"z")];
-    [editMenu addItem:fluxbar_edit_menu_item(@"Wiederholen", @selector(redo:), @"Z")];
+    [editMenu addItem:fluxbar_edit_menu_item(FluxBarLocalized(@"edit.undo", @"Undo"), @selector(undo:), @"z")];
+    [editMenu addItem:fluxbar_edit_menu_item(FluxBarLocalized(@"edit.redo", @"Redo"), @selector(redo:), @"Z")];
     [editMenu addItem:[NSMenuItem separatorItem]];
-    [editMenu addItem:fluxbar_edit_menu_item(@"Ausschneiden", @selector(cut:), @"x")];
-    [editMenu addItem:fluxbar_edit_menu_item(@"Kopieren", @selector(copy:), @"c")];
-    [editMenu addItem:fluxbar_edit_menu_item(@"Einsetzen", @selector(paste:), @"v")];
-    [editMenu addItem:fluxbar_edit_menu_item(@"Alles auswählen", @selector(selectAll:), @"a")];
+    [editMenu addItem:fluxbar_edit_menu_item(FluxBarLocalized(@"edit.cut", @"Cut"), @selector(cut:), @"x")];
+    [editMenu addItem:fluxbar_edit_menu_item(FluxBarLocalized(@"edit.copy", @"Copy"), @selector(copy:), @"c")];
+    [editMenu addItem:fluxbar_edit_menu_item(FluxBarLocalized(@"edit.paste", @"Paste"), @selector(paste:), @"v")];
+    [editMenu addItem:fluxbar_edit_menu_item(FluxBarLocalized(@"edit.select_all", @"Select All"), @selector(selectAll:), @"a")];
 
-    NSMenuItem *editRoot = [[NSMenuItem alloc] initWithTitle:@"Bearbeiten" action:nil keyEquivalent:@""];
+    NSMenuItem *editRoot = [[NSMenuItem alloc] initWithTitle:editTitle action:nil keyEquivalent:@""];
     editRoot.submenu = editMenu;
     [mainMenu addItem:editRoot];
 }
@@ -294,37 +316,64 @@ int fluxbar_prompt_settings(
         NSString *validation = [NSString stringWithUTF8String:validationValue ?: ""] ?: @"";
 
         NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"FluxBar-Einstellungen";
-        alert.informativeText = @"Die Zugangsdaten werden verschlüsselt im macOS-Schlüsselbund gespeichert.";
-        [alert addButtonWithTitle:@"Speichern"];
-        [alert addButtonWithTitle:@"Abbrechen"];
+        alert.messageText = FluxBarLocalized(@"settings.title", @"FluxBar Settings");
+        alert.informativeText = FluxBarLocalized(
+            @"settings.security_note",
+            @"Credentials are stored securely in the macOS Keychain."
+        );
+        [alert addButtonWithTitle:FluxBarLocalized(@"settings.save", @"Save")];
+        [alert addButtonWithTitle:FluxBarLocalized(@"settings.cancel", @"Cancel")];
 
         CGFloat validationHeight = validation.length > 0 ? 34 : 0;
         NSView *form = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 430, 212 + validationHeight)];
-        NSTextField *serverLabel = fluxbar_settings_label(@"Miniflux-Server", NSMakeRect(0, 182 + validationHeight, 125, 22));
+        NSTextField *serverLabel = fluxbar_settings_label(
+            FluxBarLocalized(@"settings.server", @"Miniflux Server"),
+            NSMakeRect(0, 182 + validationHeight, 125, 22)
+        );
         NSTextField *serverField = [[NSTextField alloc] initWithFrame:NSMakeRect(130, 180 + validationHeight, 300, 24)];
         serverField.stringValue = server;
         serverField.placeholderString = @"https://miniflux.example.com";
-        NSTextField *keyLabel = fluxbar_settings_label(@"API-Key", NSMakeRect(0, 146 + validationHeight, 125, 22));
+        NSTextField *keyLabel = fluxbar_settings_label(
+            FluxBarLocalized(@"settings.api_key", @"API Key"),
+            NSMakeRect(0, 146 + validationHeight, 125, 22)
+        );
         NSSecureTextField *keyField = [[NSSecureTextField alloc] initWithFrame:NSMakeRect(130, 144 + validationHeight, 300, 24)];
         keyField.stringValue = apiKey;
-        keyField.placeholderString = @"Miniflux API-Key";
-        NSTextField *sortLabel = fluxbar_settings_label(@"Sortierung", NSMakeRect(0, 110 + validationHeight, 125, 22));
+        keyField.placeholderString = FluxBarLocalized(
+            @"settings.api_key_placeholder",
+            @"Miniflux API Key"
+        );
+        NSTextField *sortLabel = fluxbar_settings_label(
+            FluxBarLocalized(@"settings.sort", @"Sort Order"),
+            NSMakeRect(0, 110 + validationHeight, 125, 22)
+        );
         NSPopUpButton *sortButton = [[NSPopUpButton alloc]
             initWithFrame:NSMakeRect(130, 106 + validationHeight, 220, 28)
                 pullsDown:NO];
-        [sortButton addItemsWithTitles:@[@"Neueste zuerst", @"Älteste zuerst"]];
+        [sortButton addItemsWithTitles:@[
+            FluxBarLocalized(@"settings.sort.newest", @"Newest First"),
+            FluxBarLocalized(@"settings.sort.oldest", @"Oldest First")
+        ]];
         [sortButton selectItemAtIndex:newestFirstValue ? 0 : 1];
-        NSButton *launchAtLoginButton = [NSButton checkboxWithTitle:@"Beim Anmelden automatisch starten"
+        NSButton *launchAtLoginButton = [NSButton checkboxWithTitle:FluxBarLocalized(
+                                                                 @"settings.launch_at_login",
+                                                                 @"Launch automatically at login"
+                                                             )
                                                              target:nil
                                                              action:nil];
         launchAtLoginButton.frame = NSMakeRect(130, 70 + validationHeight, 300, 24);
         launchAtLoginButton.state = currentLaunchAtLogin ? NSControlStateValueOn : NSControlStateValueOff;
         launchAtLoginButton.enabled = fluxbar_login_item_supported();
         if (!launchAtLoginButton.enabled) {
-            launchAtLoginButton.toolTip = @"Diese Option wird ab macOS 13 unterstützt.";
+            launchAtLoginButton.toolTip = FluxBarLocalized(
+                @"settings.launch_at_login.unsupported",
+                @"This option requires macOS 13 or later."
+            );
         }
-        NSButton *showSplashButton = [NSButton checkboxWithTitle:@"Startanzeige beim Öffnen anzeigen"
+        NSButton *showSplashButton = [NSButton checkboxWithTitle:FluxBarLocalized(
+                                                            @"settings.show_startup",
+                                                            @"Show startup notification when opening"
+                                                        )
                                                           target:nil
                                                           action:nil];
         showSplashButton.frame = NSMakeRect(130, 35 + validationHeight, 300, 24);

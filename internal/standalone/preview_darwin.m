@@ -3,6 +3,7 @@
 #import <Cocoa/Cocoa.h>
 #import <dispatch/dispatch.h>
 #import <objc/runtime.h>
+#import "localization_darwin.h"
 #import <stdbool.h>
 
 static const NSTimeInterval FluxBarHoverDelay = 0.5;
@@ -171,7 +172,7 @@ static FluxBarPreviewLayout fluxbar_preview_layout(
     bool hasMetadata = article.feed.length > 0 || publishedDate.length > 0;
     NSString *previewText = article.preview.length > 0
         ? article.preview
-        : @"Keine Textvorschau verfügbar.";
+        : FluxBarLocalized(@"preview.no_text", @"No text preview available.");
 
     CGFloat maximumWidth = MIN(500, MAX(260, visibleFrame.size.width - 32));
     CGFloat minimumWidth = MIN(hasImage ? 360 : 300, maximumWidth);
@@ -383,7 +384,9 @@ static void fluxbar_show_hover_panel(FluxBarArticlePreview *article, NSUInteger 
 
     NSTextView *textView = [[NSTextView alloc]
         initWithFrame:NSMakeRect(0, 0, layout.contentWidth, layout.previewHeight)];
-    textView.string = article.preview.length > 0 ? article.preview : @"Keine Textvorschau verfügbar.";
+    textView.string = article.preview.length > 0
+        ? article.preview
+        : FluxBarLocalized(@"preview.no_text", @"No text preview available.");
     textView.font = [NSFont systemFontOfSize:13];
     textView.textColor = NSColor.labelColor;
     textView.editable = NO;

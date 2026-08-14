@@ -3,7 +3,6 @@ package standalone
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"net/url"
 	"os/exec"
@@ -103,8 +102,8 @@ func (app *App) ready() {
 	if len(app.icon) > 0 {
 		systray.SetTemplateIcon(app.icon, app.icon)
 	}
-	systray.SetTooltip("FluxBar – Miniflux")
-	app.renderMessage("Miniflux wird geladen …", true)
+	systray.SetTooltip(localized("app.tooltip.default", "FluxBar — Miniflux"))
+	app.renderMessage(localized("status.loading", "Loading Miniflux…"), true)
 
 	app.darkMode = darkAppearance()
 	app.appearanceDark.Store(app.darkMode)
@@ -123,10 +122,10 @@ func (app *App) ready() {
 	if err == nil {
 		app.applySettings(settings)
 	} else if errors.Is(err, ErrSettingsNotFound) {
-		app.renderMessage("Konfiguration erforderlich", true)
+		app.renderMessage(localized("status.configuration_required", "Configuration required"), true)
 	} else {
 		app.logger.Printf("Einstellungen konnten nicht geladen werden: %v", err)
-		app.renderError(err)
+		app.renderError(err.Error())
 	}
 	if app.settings.ShowSplash {
 		showStartupSplash()
@@ -199,7 +198,7 @@ func (app *App) eventLoop() {
 				app.total = 0
 				app.hasData = false
 				app.logger.Printf("Aktualisierung fehlgeschlagen: %v", result.err)
-				app.renderError(result.err)
+				app.renderError(localized("status.refresh_failed", "Refresh failed"))
 			} else {
 				app.entries = result.entries
 				app.total = result.total
@@ -234,7 +233,7 @@ func (app *App) eventLoop() {
 			app.settingsEditing = false
 			if result.err != nil {
 				app.logger.Printf("Einstellungen konnten nicht gespeichert werden: %v", result.err)
-				app.renderError(result.err)
+				app.renderError(result.err.Error())
 				continue
 			}
 			if !result.saved {
@@ -244,7 +243,7 @@ func (app *App) eventLoop() {
 			app.entries = nil
 			app.total = 0
 			app.hasData = false
-			app.renderMessage("Miniflux wird geladen …", true)
+			app.renderMessage(localized("status.loading", "Loading Miniflux…"), true)
 			if app.refreshRunning {
 				app.refreshPending = true
 			} else {
@@ -281,9 +280,9 @@ func (app *App) render(entries []model.Entry, total int, darkMode bool) {
 	resetArticleHover()
 	systray.ResetMenu()
 	systray.SetTitle(strconv.Itoa(total))
-	systray.SetTooltip(fmt.Sprintf("FluxBar – %d ungelesene Artikel", total))
+	systray.SetTooltip(unreadTooltip(total))
 	if len(entries) == 0 {
-		item := systray.AddMenuItem("Keine ungelesenen Artikel", "")
+		item := systray.AddMenuItem(localized("status.no_unread", "No unread articles"), "")
 		item.Disable()
 	} else {
 		reader := app.reader
@@ -311,10 +310,10 @@ func iconForAppearance(entry model.Entry, darkMode bool) []byte {
 	return entry.Icon
 }
 
-func (app *App) renderError(err error) {
+func (app *App) renderError(message string) {
 	systray.SetTitle("!")
-	systray.SetTooltip("FluxBar – Aktualisierung fehlgeschlagen")
-	app.renderMessage("Fehler: "+truncate(err.Error(), 100), true)
+	systray.SetTooltip(localized("app.tooltip.error", "FluxBar — Error"))
+	app.renderMessage(localizedFormat("status.error_format", "Error: %s", truncate(message, 100)), true)
 }
 
 func (app *App) renderMessage(message string, footer bool) {
@@ -329,15 +328,21 @@ func (app *App) renderMessage(message string, footer bool) {
 
 func (app *App) addFooter() {
 	systray.AddSeparator()
-	refresh := systray.AddMenuItem("Aktualisieren", "Miniflux jetzt aktualisieren")
+	refresh := systray.AddMenuItem(
+		localized("menu.refresh", "Refresh"),
+		localized("menu.refresh.tooltip", "Refresh Miniflux now"),
+	)
 	if app.reader == nil {
 		refresh.Disable()
 	}
 	var settings *systray.MenuItem
 	if app.settingsEditor != nil {
-		settings = systray.AddMenuItem("Einstellungen…", "Miniflux-Zugangsdaten bearbeiten")
+		settings = systray.AddMenuItem(
+			localized("menu.settings", "Settings…"),
+			localized("menu.settings.tooltip", "Edit Miniflux credentials"),
+		)
 	}
-	quit := systray.AddMenuItem("FluxBar beenden", "")
+	quit := systray.AddMenuItem(localized("menu.quit", "Quit FluxBar"), "")
 	go func() {
 		for range refresh.ClickedCh {
 			app.requestRefresh()
@@ -355,6 +360,16 @@ func (app *App) addFooter() {
 			systray.Quit()
 		}
 	}()
+}
+
+func unreadTooltip(total int) string {
+	return localizedPlural(
+		"status.unread_count",
+		"FluxBar — {{.Count}} unread article",
+		"FluxBar — {{.Count}} unread articles",
+		total,
+		map[string]any{"Count": total},
+	)
 }
 
 func (app *App) openAndMarkRead(reader Reader, entry model.Entry) {
