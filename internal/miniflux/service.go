@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,10 @@ type client interface {
 	EntriesContext(context.Context, *miniflux.Filter) (*miniflux.EntryResultSet, error)
 	UpdateEntriesContext(context.Context, []int64, string) error
 	FeedIconContext(context.Context, int64) (*miniflux.FeedIcon, error)
+	CategoriesContext(context.Context) (miniflux.Categories, error)
+	FeedsContext(context.Context) (miniflux.Feeds, error)
+	FetchCountersContext(context.Context) (*miniflux.FeedCounters, error)
+	ToggleStarredContext(context.Context, int64) error
 }
 
 type logger interface {
@@ -44,6 +49,7 @@ type Service struct {
 
 	iconMu    sync.RWMutex
 	iconCache map[int64]cachedIcon
+	iconLoads map[int64]chan struct{}
 
 	debugIcons       bool
 	dumpFailedIcons  bool
@@ -81,6 +87,7 @@ func newWithClient(client client, sort SortOrder, logger logger) *Service {
 		logger:           logger,
 		sort:             sort,
 		iconCache:        make(map[int64]cachedIcon),
+		iconLoads:        make(map[int64]chan struct{}),
 		debugIcons:       environmentEnabled("FLUXBAR_DEBUG_ICONS"),
 		dumpFailedIcons:  environmentEnabled("FLUXBAR_DUMP_FAILED_ICONS"),
 		iconDumpDir:      iconDumpDirectory(),
@@ -114,18 +121,149 @@ func (service *Service) Unread(ctx context.Context) ([]model.Entry, int, error) 
 		return nil, 0, fmt.Errorf("ungelesene Miniflux-Einträge laden: leere Antwort")
 	}
 
-	entries := make([]model.Entry, 0, len(result.Entries))
+	entries := mapEntries(result.Entries)
 	feedEntries := make(map[int64][]int)
-	for _, source := range result.Entries {
+	for index, entry := range entries {
+		feedID := entry.FeedID
+		if feedID > 0 {
+			feedEntries[feedID] = append(feedEntries[feedID], index)
+		}
+	}
+
+	service.loadIcons(ctx, entries, feedEntries)
+	return entries, result.Total, nil
+}
+
+// Browse returns the selected article list and navigation hierarchy. Feed and
+// article images are intentionally not loaded on this path.
+func (service *Service) Browse(ctx context.Context, selection model.Selection) (model.BrowseSnapshot, error) {
+	selection = selection.Normalized()
+	filter := &miniflux.Filter{
+		Limit:     200,
+		Order:     "published_at",
+		Direction: service.direction(),
+		Statuses:  []string{miniflux.EntryStatusRead, miniflux.EntryStatusUnread},
+	}
+	if selection.UnreadOnly {
+		filter.Statuses = nil
+		filter.Status = miniflux.EntryStatusUnread
+	}
+	switch selection.Kind {
+	case model.SelectionUnread:
+		filter.Statuses = nil
+		filter.Status = miniflux.EntryStatusUnread
+	case model.SelectionStarred:
+		filter.Starred = miniflux.FilterOnlyStarred
+	case model.SelectionCategory:
+		filter.CategoryID = selection.ID
+	case model.SelectionFeed:
+		filter.FeedID = selection.ID
+	}
+	counters, err := service.client.FetchCountersContext(ctx)
+	if err != nil {
+		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Zähler laden: %w", err)
+	}
+	if counters == nil {
+		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Zähler laden: leere Antwort")
+	}
+
+	starredTotal := 0
+	if selection.Kind != model.SelectionStarred {
+		starredResult, err := service.client.EntriesContext(ctx, &miniflux.Filter{
+			Starred:  miniflux.FilterOnlyStarred,
+			Statuses: []string{miniflux.EntryStatusRead, miniflux.EntryStatusUnread},
+			Limit:    1,
+		})
+		if err != nil {
+			return model.BrowseSnapshot{}, fmt.Errorf("markierte Miniflux-Einträge zählen: %w", err)
+		}
+		if starredResult == nil {
+			return model.BrowseSnapshot{}, fmt.Errorf("markierte Miniflux-Einträge zählen: leere Antwort")
+		}
+		starredTotal = starredResult.Total
+	}
+
+	result, err := service.client.EntriesContext(ctx, filter)
+	if err != nil {
+		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Einträge laden: %w", err)
+	}
+	if result == nil {
+		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Einträge laden: leere Antwort")
+	}
+	if selection.Kind == model.SelectionStarred {
+		starredTotal = result.Total
+	}
+	categories, err := service.client.CategoriesContext(ctx)
+	if err != nil {
+		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Kategorien laden: %w", err)
+	}
+	feeds, err := service.client.FeedsContext(ctx)
+	if err != nil {
+		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Feeds laden: %w", err)
+	}
+
+	navigation, unreadTotal := mapNavigation(categories, feeds, counters.UnreadCounters)
+	return model.BrowseSnapshot{
+		Version:      1,
+		Selection:    selection,
+		Entries:      mapEntries(result.Entries),
+		Categories:   navigation,
+		Total:        result.Total,
+		UnreadTotal:  unreadTotal,
+		StarredTotal: starredTotal,
+	}, nil
+}
+
+func (service *Service) SetRead(ctx context.Context, entryID int64, read bool) error {
+	status := miniflux.EntryStatusUnread
+	if read {
+		status = miniflux.EntryStatusRead
+	}
+	if err := service.client.UpdateEntriesContext(ctx, []int64{entryID}, status); err != nil {
+		return fmt.Errorf("Miniflux-Lesestatus aktualisieren: %w", err)
+	}
+	return nil
+}
+
+// SetStarred adapts Miniflux's toggle-only API to desired-state semantics.
+func (service *Service) SetStarred(ctx context.Context, entryID int64, current, desired bool) error {
+	if current == desired {
+		return nil
+	}
+	if err := service.client.ToggleStarredContext(ctx, entryID); err != nil {
+		return fmt.Errorf("Miniflux-Markierung aktualisieren: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) FeedIcon(ctx context.Context, feedID int64, feedName string) ([]byte, []byte) {
+	icon, _ := service.icon(ctx, feedID, feedName)
+	return icon.regular, icon.dark
+}
+
+func (service *Service) direction() string {
+	if service.sort == SortNewestFirst {
+		return "desc"
+	}
+	return "asc"
+}
+
+func mapEntries(sources miniflux.Entries) []model.Entry {
+	entries := make([]model.Entry, 0, len(sources))
+	for _, source := range sources {
 		if source == nil {
 			continue
 		}
 		feedID := source.FeedID
 		feedName := ""
+		var categoryID int64
 		if source.Feed != nil {
 			feedName = source.Feed.Title
 			if feedID == 0 {
 				feedID = source.Feed.ID
+			}
+			if source.Feed.Category != nil {
+				categoryID = source.Feed.Category.ID
 			}
 		}
 		preview := article.Extract(source.Content, source.URL, article.PreviewLimit)
@@ -133,19 +271,55 @@ func (service *Service) Unread(ctx context.Context) ([]model.Entry, int, error) 
 			ID:          source.ID,
 			Title:       source.Title,
 			URL:         source.URL,
+			CommentsURL: source.CommentsURL,
 			FeedID:      feedID,
 			FeedName:    feedName,
+			CategoryID:  categoryID,
 			PublishedAt: source.Date,
 			Preview:     preview.Text,
 			ImageURL:    preview.ImageURL,
+			Status:      source.Status,
+			Starred:     source.Starred,
 		})
-		if feedID > 0 {
-			feedEntries[feedID] = append(feedEntries[feedID], len(entries)-1)
-		}
 	}
+	return entries
+}
 
-	service.loadIcons(ctx, entries, feedEntries)
-	return entries, result.Total, nil
+func mapNavigation(categories miniflux.Categories, feeds miniflux.Feeds, unreadCounters map[int64]int) ([]model.Category, int) {
+	result := make([]model.Category, 0, len(categories))
+	indexes := make(map[int64]int, len(categories))
+	unreadTotal := 0
+	for _, category := range categories {
+		if category == nil {
+			continue
+		}
+		indexes[category.ID] = len(result)
+		result = append(result, model.Category{ID: category.ID, Title: category.Title, Feeds: []model.Feed{}})
+	}
+	for _, feed := range feeds {
+		if feed == nil || feed.Category == nil {
+			continue
+		}
+		index, found := indexes[feed.Category.ID]
+		if !found {
+			continue
+		}
+		unreadCount := unreadCounters[feed.ID]
+		result[index].UnreadCount += unreadCount
+		unreadTotal += unreadCount
+		result[index].Feeds = append(result[index].Feeds, model.Feed{
+			ID: feed.ID, Title: feed.Title, CategoryID: feed.Category.ID, UnreadCount: unreadCount,
+		})
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Title) < strings.ToLower(result[j].Title)
+	})
+	for index := range result {
+		sort.SliceStable(result[index].Feeds, func(i, j int) bool {
+			return strings.ToLower(result[index].Feeds[i].Title) < strings.ToLower(result[index].Feeds[j].Title)
+		})
+	}
+	return result, unreadTotal
 }
 
 func (service *Service) loadIcons(ctx context.Context, entries []model.Entry, feedEntries map[int64][]int) {
@@ -217,10 +391,10 @@ func (service *Service) loadIcons(ctx context.Context, entries []model.Entry, fe
 }
 
 func (service *Service) icon(ctx context.Context, feedID int64, feedName string) (cachedIcon, bool) {
-	service.iconMu.RLock()
+	service.iconMu.Lock()
 	icon, known := service.iconCache[feedID]
-	service.iconMu.RUnlock()
 	if known {
+		service.iconMu.Unlock()
 		if service.debugIcons {
 			service.logger.Printf(
 				"level=debug component=icon event=cache_hit feed_id=%d feed=%q output_bytes=%d dark_output_bytes=%d",
@@ -229,6 +403,27 @@ func (service *Service) icon(ctx context.Context, feedID int64, feedName string)
 		}
 		return icon, true
 	}
+	if loaded := service.iconLoads[feedID]; loaded != nil {
+		service.iconMu.Unlock()
+		select {
+		case <-loaded:
+			service.iconMu.RLock()
+			icon, known := service.iconCache[feedID]
+			service.iconMu.RUnlock()
+			return icon, known
+		case <-ctx.Done():
+			return cachedIcon{}, false
+		}
+	}
+	loaded := make(chan struct{})
+	service.iconLoads[feedID] = loaded
+	service.iconMu.Unlock()
+	defer func() {
+		service.iconMu.Lock()
+		delete(service.iconLoads, feedID)
+		close(loaded)
+		service.iconMu.Unlock()
+	}()
 
 	started := time.Now()
 	feedIcon, err := service.client.FeedIconContext(ctx, feedID)

@@ -15,18 +15,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KevinCFechtel/FluxBar/internal/model"
 	miniflux "miniflux.app/v2/client"
 )
 
 type fakeClient struct {
-	entries *miniflux.EntryResultSet
-	icons   map[int64]*miniflux.FeedIcon
+	entries    *miniflux.EntryResultSet
+	icons      map[int64]*miniflux.FeedIcon
+	categories miniflux.Categories
+	feeds      miniflux.Feeds
+	counters   *miniflux.FeedCounters
 
 	mu          sync.Mutex
 	iconCalls   map[int64]int
 	updatedIDs  []int64
 	updatedWith string
 	lastFilter  *miniflux.Filter
+	starredID   int64
+}
+
+func (client *fakeClient) CategoriesContext(context.Context) (miniflux.Categories, error) {
+	return client.categories, nil
+}
+
+func (client *fakeClient) FeedsContext(context.Context) (miniflux.Feeds, error) {
+	return client.feeds, nil
+}
+
+func (client *fakeClient) FetchCountersContext(context.Context) (*miniflux.FeedCounters, error) {
+	if client.counters == nil {
+		return &miniflux.FeedCounters{}, nil
+	}
+	return client.counters, nil
+}
+
+func (client *fakeClient) ToggleStarredContext(_ context.Context, entryID int64) error {
+	client.starredID = entryID
+	return nil
 }
 
 func (client *fakeClient) EntriesContext(_ context.Context, filter *miniflux.Filter) (*miniflux.EntryResultSet, error) {
@@ -90,6 +115,120 @@ func TestMarkRead(t *testing.T) {
 	}
 	if len(client.updatedIDs) != 2 || client.updatedIDs[0] != 3 || client.updatedWith != miniflux.EntryStatusRead {
 		t.Fatalf("unexpected update: %#v %q", client.updatedIDs, client.updatedWith)
+	}
+}
+
+func TestBrowseMapsNavigationAndSelection(t *testing.T) {
+	category := &miniflux.Category{ID: 4, Title: "Technology"}
+	client := &fakeClient{
+		entries: &miniflux.EntryResultSet{Total: 1, Entries: miniflux.Entries{
+			{ID: 10, Title: "Article", Status: miniflux.EntryStatusUnread, Starred: true, CommentsURL: "https://example.com/comments", FeedID: 7, Feed: &miniflux.Feed{ID: 7, Title: "Feed", Category: category}},
+		}},
+		categories: miniflux.Categories{category},
+		feeds:      miniflux.Feeds{{ID: 7, Title: "Feed", Category: category}},
+		counters:   &miniflux.FeedCounters{UnreadCounters: map[int64]int{7: 1}},
+		iconCalls:  make(map[int64]int),
+	}
+	service := NewWithClient(client, nil)
+
+	snapshot, err := service.Browse(context.Background(), model.Selection{Kind: model.SelectionCategory, ID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.lastFilter.CategoryID != 4 || client.lastFilter.Limit != 200 {
+		t.Fatalf("filter = %#v", client.lastFilter)
+	}
+	if len(snapshot.Categories) != 1 || len(snapshot.Categories[0].Feeds) != 1 {
+		t.Fatalf("categories = %#v", snapshot.Categories)
+	}
+	if len(snapshot.Entries) != 1 || snapshot.Entries[0].CommentsURL == "" || !snapshot.Entries[0].Starred {
+		t.Fatalf("entries = %#v", snapshot.Entries)
+	}
+	if snapshot.UnreadTotal != 1 {
+		t.Fatalf("unread total = %d", snapshot.UnreadTotal)
+	}
+	if snapshot.StarredTotal != 1 || snapshot.Categories[0].UnreadCount != 1 || snapshot.Categories[0].Feeds[0].UnreadCount != 1 {
+		t.Fatalf("navigation counts = %#v, starred total = %d", snapshot.Categories, snapshot.StarredTotal)
+	}
+	if client.iconCalls[7] != 0 {
+		t.Fatal("Browse loaded feed icons synchronously")
+	}
+}
+
+func TestBrowseAppliesSelectionFilters(t *testing.T) {
+	tests := []struct {
+		name      string
+		selection model.Selection
+		assert    func(*testing.T, *miniflux.Filter)
+	}{
+		{name: "all", selection: model.Selection{Kind: model.SelectionAll}, assert: func(t *testing.T, filter *miniflux.Filter) {
+			if len(filter.Statuses) != 2 || filter.Status != "" || filter.Starred != "" {
+				t.Fatalf("all filter = %#v", filter)
+			}
+		}},
+		{name: "all unread only", selection: model.Selection{Kind: model.SelectionAll, UnreadOnly: true}, assert: func(t *testing.T, filter *miniflux.Filter) {
+			if filter.Status != miniflux.EntryStatusUnread || len(filter.Statuses) != 0 {
+				t.Fatalf("all unread-only filter = %#v", filter)
+			}
+		}},
+		{name: "unread", selection: model.Selection{Kind: model.SelectionUnread}, assert: func(t *testing.T, filter *miniflux.Filter) {
+			if filter.Status != miniflux.EntryStatusUnread || len(filter.Statuses) != 0 {
+				t.Fatalf("unread filter = %#v", filter)
+			}
+		}},
+		{name: "starred", selection: model.Selection{Kind: model.SelectionStarred}, assert: func(t *testing.T, filter *miniflux.Filter) {
+			if filter.Starred != miniflux.FilterOnlyStarred {
+				t.Fatalf("starred filter = %#v", filter)
+			}
+		}},
+		{name: "feed", selection: model.Selection{Kind: model.SelectionFeed, ID: 9}, assert: func(t *testing.T, filter *miniflux.Filter) {
+			if filter.FeedID != 9 {
+				t.Fatalf("feed filter = %#v", filter)
+			}
+		}},
+		{name: "feed unread only", selection: model.Selection{Kind: model.SelectionFeed, ID: 9, UnreadOnly: true}, assert: func(t *testing.T, filter *miniflux.Filter) {
+			if filter.FeedID != 9 || filter.Status != miniflux.EntryStatusUnread || len(filter.Statuses) != 0 {
+				t.Fatalf("feed unread-only filter = %#v", filter)
+			}
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeClient{
+				entries:   &miniflux.EntryResultSet{},
+				iconCalls: make(map[int64]int),
+			}
+			service := NewWithClient(client, nil)
+			if _, err := service.Browse(context.Background(), test.selection); err != nil {
+				t.Fatal(err)
+			}
+			test.assert(t, client.lastFilter)
+		})
+	}
+}
+
+func TestSetReadAndStarred(t *testing.T) {
+	client := &fakeClient{iconCalls: make(map[int64]int)}
+	service := NewWithClient(client, nil)
+	if err := service.SetRead(context.Background(), 12, false); err != nil {
+		t.Fatal(err)
+	}
+	if client.updatedWith != miniflux.EntryStatusUnread {
+		t.Fatalf("status = %q", client.updatedWith)
+	}
+	if err := service.SetStarred(context.Background(), 12, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if client.starredID != 12 {
+		t.Fatalf("starred ID = %d", client.starredID)
+	}
+	client.starredID = 0
+	if err := service.SetStarred(context.Background(), 12, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if client.starredID != 0 {
+		t.Fatal("equal starred state toggled")
 	}
 }
 

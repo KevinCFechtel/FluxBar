@@ -102,7 +102,7 @@ func (app *App) ready() {
 	if len(app.icon) > 0 {
 		systray.SetTemplateIcon(app.icon, app.icon)
 	}
-	systray.SetTooltip(localized("app.tooltip.default", "FluxBar — Miniflux"))
+	systray.SetTooltip(localized("app.tooltip.default", "FluxNews — Miniflux"))
 	app.renderMessage(localized("status.loading", "Loading Miniflux…"), true)
 
 	app.darkMode = darkAppearance()
@@ -312,7 +312,7 @@ func iconForAppearance(entry model.Entry, darkMode bool) []byte {
 
 func (app *App) renderError(message string) {
 	systray.SetTitle("!")
-	systray.SetTooltip(localized("app.tooltip.error", "FluxBar — Error"))
+	systray.SetTooltip(localized("app.tooltip.error", "FluxNews — Error"))
 	app.renderMessage(localizedFormat("status.error_format", "Error: %s", truncate(message, 100)), true)
 }
 
@@ -342,7 +342,7 @@ func (app *App) addFooter() {
 			localized("menu.settings.tooltip", "Edit Miniflux credentials"),
 		)
 	}
-	quit := systray.AddMenuItem(localized("menu.quit", "Quit FluxBar"), "")
+	quit := systray.AddMenuItem(localized("menu.quit", "Quit FluxNews"), "")
 	go func() {
 		for range refresh.ClickedCh {
 			app.requestRefresh()
@@ -365,8 +365,8 @@ func (app *App) addFooter() {
 func unreadTooltip(total int) string {
 	return localizedPlural(
 		"status.unread_count",
-		"FluxBar — {{.Count}} unread article",
-		"FluxBar — {{.Count}} unread articles",
+		"FluxNews — {{.Count}} unread article",
+		"FluxNews — {{.Count}} unread articles",
 		total,
 		map[string]any{"Count": total},
 	)

@@ -101,7 +101,7 @@ static bool fluxbar_update_launch_at_login(bool enabled, NSString **errorMessage
             [SMAppService openSystemSettingsLoginItems];
             *errorMessage = FluxBarLocalized(
                 @"error.login_item_disabled",
-                @"FluxBar was disabled in macOS Login Items. Please allow it there again."
+                @"FluxNews was disabled in macOS Login Items. Please allow it there again."
             );
             return false;
         }
@@ -121,7 +121,7 @@ static bool fluxbar_update_launch_at_login(bool enabled, NSString **errorMessage
             [SMAppService openSystemSettingsLoginItems];
             *errorMessage = FluxBarLocalized(
                 @"error.login_item_approval",
-                @"Please allow FluxBar in macOS Login Items."
+                @"Please allow FluxNews in macOS Login Items."
             );
             return false;
         }
@@ -316,7 +316,7 @@ int fluxbar_prompt_settings(
         NSString *validation = [NSString stringWithUTF8String:validationValue ?: ""] ?: @"";
 
         NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = FluxBarLocalized(@"settings.title", @"FluxBar Settings");
+        alert.messageText = FluxBarLocalized(@"settings.title", @"FluxNews Settings");
         alert.informativeText = FluxBarLocalized(
             @"settings.security_note",
             @"Credentials are stored securely in the macOS Keychain."

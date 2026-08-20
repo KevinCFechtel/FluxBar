@@ -4,13 +4,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 APP_DIR="${REPOSITORY_DIR}/dist/FluxBar.app"
-CONTENTS_DIR="${APP_DIR}/Contents"
-MACOS_DIR="${CONTENTS_DIR}/MacOS"
-RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+DERIVED_DATA="${REPOSITORY_DIR}/.build/DerivedData"
+CONFIGURATION="${CONFIGURATION:-Debug}"
+BUILT_APP="${DERIVED_DATA}/Build/Products/${CONFIGURATION}/FluxBar.app"
 
-LDFLAGS=(
-  -s -w
-)
+case "${GOARCH:-$(go env GOARCH)}" in
+  arm64) BUILD_ARCH="arm64" ;;
+  amd64) BUILD_ARCH="x86_64" ;;
+  *)
+    echo "Nicht unterstützte Architektur: ${GOARCH:-$(go env GOARCH)}" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "${APP_DIR}" != "${REPOSITORY_DIR}/dist/FluxBar.app" ]]; then
   echo "Unerwarteter App-Pfad: ${APP_DIR}" >&2
@@ -18,13 +23,19 @@ if [[ "${APP_DIR}" != "${REPOSITORY_DIR}/dist/FluxBar.app" ]]; then
 fi
 
 rm -rf -- "${APP_DIR}"
-mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
-install -m 0644 "${SCRIPT_DIR}/Info.plist" "${CONTENTS_DIR}/Info.plist"
-install -m 0644 "${SCRIPT_DIR}/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+xcodebuild \
+  -project "${REPOSITORY_DIR}/macos/FluxNews.xcodeproj" \
+  -scheme FluxNews \
+  -configuration "${CONFIGURATION}" \
+  -destination "platform=macOS" \
+  -derivedDataPath "${DERIVED_DATA}" \
+  ARCHS="${BUILD_ARCH}" \
+  ONLY_ACTIVE_ARCH=NO \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 
-cd "${REPOSITORY_DIR}"
-MACOSX_DEPLOYMENT_TARGET=11.0 CGO_ENABLED=1 GOOS=darwin GOARCH="${GOARCH:-$(go env GOARCH)}" \
-  go build -buildvcs=false -o "${MACOS_DIR}/FluxBar" -ldflags "${LDFLAGS[*]}" ./cmd/fluxbar-standalone
+mkdir -p "${REPOSITORY_DIR}/dist"
+ditto "${BUILT_APP}" "${APP_DIR}"
 
 if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "${APP_DIR}"
