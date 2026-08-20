@@ -42,3 +42,5 @@ go.work.sum
 *.pem
 *.key
 AGENTS.md
+PRODUCT_CONTEXT.md
+docs/
