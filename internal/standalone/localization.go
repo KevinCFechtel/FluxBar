@@ -1,41 +1,36 @@
 package standalone
 
 import (
-	"embed"
-	"fmt"
 	"log"
 
-	"fyne.io/fyne/v2/lang"
+	"github.com/KevinCFechtel/FluxBar/internal/localization"
+	locale "github.com/jeandeaual/go-locale"
 )
 
-// translationFiles keeps all application translations in the Go binary so
-// they can be reused by every platform-specific interface.
-//
-//go:embed translations
-var translationFiles embed.FS
+var appLocalizer, translationLoadError = loadTranslations()
 
-var translationLoadError = loadTranslations()
+func loadTranslations() (*localization.Localizer, error) {
+	locales, err := locale.GetLocales()
+	if err != nil {
+		log.Printf("FluxBar user locales could not be loaded: %v", err)
+		locales = []string{"en"}
+	}
 
-func loadTranslations() error {
-	err := lang.AddTranslationsFS(translationFiles, "translations")
+	localizer, err := localization.New(locales...)
 	if err != nil {
 		log.Printf("FluxBar translations could not be loaded: %v", err)
 	}
-	return err
+	return localizer, err
 }
 
 func localized(key, fallback string) string {
-	return lang.X(key, fallback)
+	return appLocalizer.Text(key, fallback)
 }
 
 func localizedFormat(key, fallback string, arguments ...any) string {
-	return fmt.Sprintf(localized(key, fallback), arguments...)
+	return appLocalizer.Format(key, fallback, arguments...)
 }
 
 func localizedPlural(key, oneFallback, otherFallback string, count int, data any) string {
-	fallback := otherFallback
-	if count == 1 {
-		fallback = oneFallback
-	}
-	return lang.XN(key, fallback, count, data)
+	return appLocalizer.Plural(key, oneFallback, otherFallback, count, data)
 }
