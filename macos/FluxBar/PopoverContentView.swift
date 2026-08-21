@@ -4,7 +4,7 @@ import SwiftUI
 enum PopoverLayout {
     static let rowWidth: CGFloat = 620
     static let cardWidth: CGFloat = 390
-    static let sidebarWidth: CGFloat = 200
+    static let sidebarWidth: CGFloat = 240
     static let rowHeight: CGFloat = 620
     static let cardHeight: CGFloat = 760
     static let verticalScreenMargin: CGFloat = 32
