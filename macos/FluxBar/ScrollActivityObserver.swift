@@ -4,16 +4,14 @@ import SwiftUI
 struct ScrollActivity {
     let offsetDelta: CGFloat
     let userInitiated: Bool
-    let epoch: UInt64
 }
 
 struct ScrollActivityObserver: NSViewRepresentable {
     let isPaused: Bool
-    let epoch: UInt64
     let onActivity: (ScrollActivity) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(isPaused: isPaused, epoch: epoch, onActivity: onActivity)
+        Coordinator(isPaused: isPaused, onActivity: onActivity)
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -24,7 +22,7 @@ struct ScrollActivityObserver: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.onActivity = onActivity
-        context.coordinator.update(isPaused: isPaused, epoch: epoch)
+        context.coordinator.update(isPaused: isPaused)
         DispatchQueue.main.async { context.coordinator.attach(to: view.enclosingScrollView) }
     }
 
@@ -40,18 +38,15 @@ struct ScrollActivityObserver: NSViewRepresentable {
         private var lastOffsetY: CGFloat?
         private var lastVerticalWheelTime: TimeInterval = -.infinity
         private var isPaused: Bool
-        private var epoch: UInt64
 
-        init(isPaused: Bool, epoch: UInt64, onActivity: @escaping (ScrollActivity) -> Void) {
+        init(isPaused: Bool, onActivity: @escaping (ScrollActivity) -> Void) {
             self.isPaused = isPaused
-            self.epoch = epoch
             self.onActivity = onActivity
         }
 
-        func update(isPaused: Bool, epoch: UInt64) {
-            guard self.isPaused != isPaused || self.epoch != epoch else { return }
+        func update(isPaused: Bool) {
+            guard self.isPaused != isPaused else { return }
             self.isPaused = isPaused
-            self.epoch = epoch
             lastOffsetY = scrollView?.contentView.bounds.origin.y
             lastVerticalWheelTime = -.infinity
         }
@@ -115,7 +110,7 @@ struct ScrollActivityObserver: NSViewRepresentable {
             let offsetDelta = offsetY - previous
             guard offsetDelta != 0 else { return }
             let recentWheel = ProcessInfo.processInfo.systemUptime - lastVerticalWheelTime < 0.25
-            onActivity(ScrollActivity(offsetDelta: offsetDelta, userInitiated: recentWheel, epoch: epoch))
+            onActivity(ScrollActivity(offsetDelta: offsetDelta, userInitiated: recentWheel))
         }
     }
 }
