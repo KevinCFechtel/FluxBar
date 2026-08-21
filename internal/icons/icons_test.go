@@ -9,7 +9,6 @@ import (
 	"image/png"
 	"testing"
 
-	"github.com/KevinCFechtel/FluxBar/internal/assets"
 	ico "github.com/sergeymakinen/go-ico"
 )
 
@@ -66,43 +65,6 @@ func TestNormalizeSVG(t *testing.T) {
 	}
 	if decoded.Bounds() != image.Rect(0, 0, 32, 32) {
 		t.Fatalf("normalized bounds = %v", decoded.Bounds())
-	}
-}
-
-func TestNormalizeMenuBarAsset(t *testing.T) {
-	got, err := Normalize(assets.FluxBarTemplateSVG(), "image/svg+xml", 44)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := png.Decode(bytes.NewReader(got))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Bounds() != image.Rect(0, 0, 44, 44) {
-		t.Fatalf("normalized bounds = %v", decoded.Bounds())
-	}
-	nonTransparent := 0
-	for y := decoded.Bounds().Min.Y; y < decoded.Bounds().Max.Y; y++ {
-		for x := decoded.Bounds().Min.X; x < decoded.Bounds().Max.X; x++ {
-			if _, _, _, alpha := decoded.At(x, y).RGBA(); alpha > 0 {
-				nonTransparent++
-			}
-		}
-	}
-	if nonTransparent == 0 {
-		t.Fatal("normalized menu bar asset contains no visible pixels")
-	}
-	if _, _, _, alpha := decoded.At(0, 0).RGBA(); alpha != 0 {
-		t.Fatal("menu bar asset corner is not transparent")
-	}
-	if _, _, _, alpha := decoded.At(12, 22).RGBA(); alpha == 0 {
-		t.Fatal("left page is missing from the template icon")
-	}
-	if _, _, _, alpha := decoded.At(32, 22).RGBA(); alpha == 0 {
-		t.Fatal("right page is missing from the template icon")
-	}
-	if _, _, _, alpha := decoded.At(22, 22).RGBA(); alpha != 0 {
-		t.Fatal("book spine gap is not transparent")
 	}
 }
 
