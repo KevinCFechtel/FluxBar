@@ -19,7 +19,7 @@ The project is released under the BSD 3-Clause License. Contributions, bug repor
 
 ## Requirements
 
-- macOS 11 or later
+- macOS 15 or later
 - Go 1.25.1 or later
 - Xcode Command Line Tools
 - An accessible Miniflux instance with an API key

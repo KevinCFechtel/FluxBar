@@ -61,7 +61,6 @@ struct PopoverContentView: View {
         }
         .frame(width: PopoverLayout.width(style: store.articleListStyle, sidebarVisible: sidebarVisible))
         .frame(maxHeight: .infinity)
-        .background(.regularMaterial)
         .sheet(isPresented: $store.showingSettings) {
             SettingsView(store: store, localization: localization)
         }
@@ -69,7 +68,7 @@ struct PopoverContentView: View {
 }
 
 private struct ArticlePane: View {
-    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: BrowserStore
     @ObservedObject var localization: Localization
     @Binding var sidebarVisible: Bool
@@ -90,7 +89,6 @@ private struct ArticlePane: View {
             Divider()
             content
         }
-        .background(colorScheme == .light ? Color.white.opacity(0.72) : Color.clear)
         .background {
             if store.snapshot.entries.isEmpty {
                 KeyboardCommandObserver { command in
@@ -105,13 +103,13 @@ private struct ArticlePane: View {
                     .padding(.bottom, 12)
             }
         }
-        .onChange(of: store.listPresentationRevision) { _ in
+        .onChange(of: store.listPresentationRevision) {
             exposureTracker.reset()
             trackerPresentationRevision = store.listPresentationRevision
             selectedArticleID = nil
             suppressScrolloverUntil = ProcessInfo.processInfo.systemUptime + 0.4
         }
-        .onChange(of: store.isPopoverVisible) { visible in
+        .onChange(of: store.isPopoverVisible) { _, visible in
             exposureTracker.reset()
             trackerPresentationRevision = store.listPresentationRevision
             if visible {
@@ -121,11 +119,12 @@ private struct ArticlePane: View {
         .onReceive(exposureTimer) { date in
             observeExposure(at: date.timeIntervalSinceReferenceDate)
         }
-        .onChange(of: store.snapshot.entries.map(\.id)) { ids in
+        .onChange(of: store.snapshot.entries.map(\.id)) { _, ids in
             if let selectedArticleID, !ids.contains(selectedArticleID) {
                 self.selectedArticleID = nil
             }
         }
+        .background(.regularMaterial)
     }
 
     private var header: some View {
@@ -223,17 +222,18 @@ private struct ArticlePane: View {
             .accessibilityLabel(localization.text("menu.settings", "Settings…"))
         }
         .padding(.horizontal, 12)
-        .frame(height: 44)
+        .padding(.vertical, 9)
     }
 
     @ViewBuilder
     private var content: some View {
         if let error = store.errorMessage, store.snapshot.entries.isEmpty {
-            EmptyState(
-                title: localization.text("status.refresh_failed", "Refresh failed"),
-                detail: error,
-                systemImage: "exclamationmark.triangle"
+            ContentUnavailableView(
+                localization.text("status.refresh_failed", "Refresh failed"),
+                systemImage: "exclamationmark.triangle",
+                description: Text(error)
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if store.isLoading && store.snapshot.entries.isEmpty {
             VStack(spacing: 12) {
                 ProgressView()
@@ -242,11 +242,12 @@ private struct ArticlePane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if store.snapshot.entries.isEmpty {
-            EmptyState(
-                title: localization.text("status.no_articles", "No articles"),
-                detail: localization.text("status.no_articles_detail", "There are no articles in this selection."),
-                systemImage: "tray"
+            ContentUnavailableView(
+                localization.text("status.no_articles", "No articles"),
+                systemImage: "tray",
+                description: Text(localization.text("status.no_articles_detail", "There are no articles in this selection."))
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             GeometryReader { geometry in
                 ScrollViewReader { proxy in
@@ -299,7 +300,7 @@ private struct ArticlePane: View {
                         trackerPresentationRevision = store.listPresentationRevision
                         observeExposure(at: Date.timeIntervalSinceReferenceDate)
                     }
-                    .onChange(of: geometry.size) { size in
+                    .onChange(of: geometry.size) { _, size in
                         let previousSize = articleViewport.size
                         articleViewport = CGRect(origin: .zero, size: size)
                         if abs(previousSize.height - size.height) < 0.5 {
@@ -328,8 +329,12 @@ private struct ArticlePane: View {
     }
 
     private func toggleSidebar() {
-        withAnimation(.easeInOut(duration: PopoverLayout.sidebarAnimationDuration)) {
+        if reduceMotion {
             sidebarVisible.toggle()
+        } else {
+            withAnimation(.easeInOut(duration: PopoverLayout.sidebarAnimationDuration)) {
+                sidebarVisible.toggle()
+            }
         }
         layoutChanged(sidebarVisible)
     }
@@ -430,8 +435,9 @@ private struct ArticlePane: View {
         return store.snapshot.entries.first { $0.id == selectedArticleID }
     }
 
+    @ViewBuilder
     private func automaticReadUndo(_ undo: AutomaticReadUndo) -> some View {
-        HStack(spacing: 10) {
+        let content = HStack(spacing: 10) {
             Text(localization.plural(
                 "status.scrollover_marked_read",
                 one: "{{.Count}} article marked as read",
@@ -446,8 +452,14 @@ private struct ArticlePane: View {
         .font(.callout)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(radius: 4, y: 2)
+
+        if #available(macOS 26, *) {
+            content.glassEffect()
+        } else {
+            content
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4, y: 2)
+        }
     }
 
     private var selectionTitle: String {
@@ -463,152 +475,138 @@ private struct ArticlePane: View {
     }
 
     private var titleCount: Int {
-        let selection = store.snapshot.selection
-        if selection.unreadOnly == true || selection.kind == "unread" {
-            return store.snapshot.total
-        }
-        return store.snapshot.entries.count
+        store.snapshot.total
     }
 
     private func countBadge(_ count: Int) -> some View {
         Text("\(count)")
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.12), in: Capsule())
-    }
-}
-
-private struct EmptyState: View {
-    let title: String
-    let detail: String
-    let systemImage: String
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.system(size: 30))
-                .foregroundStyle(.secondary)
-            Text(title).font(.headline)
-            Text(detail)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding()
+            .accessibilityLabel("\(count)")
     }
 }
 
 private struct NavigationSidebar: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var localization: Localization
-    @State private var expandedCategories: Set<Int64> = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(localization.text("navigation.feeds", "Feeds"))
-                .font(.headline)
-                .padding(.horizontal, 12)
-                .frame(height: 44)
-            Divider()
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    selectionButton(localization.text("navigation.all", "All News"), icon: "tray.full", count: store.snapshot.unreadTotal, route: .all)
-                    selectionButton(localization.text("navigation.starred", "Starred"), icon: "star.fill", count: store.snapshot.starredTotal, route: .starred)
-                    ForEach(store.snapshot.categories) { category in
-                        categoryButton(category)
-                        if expandedCategories.contains(category.id) {
-                            ForEach(category.feeds) { feed in
-                                feedButton(feed)
-                            }
-                        }
-                    }
+        List(selection: selectedRoute) {
+            Section {
+                sidebarRow(.all(
+                    title: localization.text("navigation.all", "All News"),
+                    count: store.snapshot.unreadTotal
+                ))
+                sidebarRow(.starred(
+                    title: localization.text("navigation.starred", "Starred"),
+                    count: store.snapshot.starredTotal
+                ))
+            }
+            Section(localization.text("navigation.feeds", "Feeds")) {
+                OutlineGroup(categoryItems, children: \.children) { item in
+                    sidebarRow(item)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
             }
         }
-        .background(.bar)
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(.regularMaterial)
     }
 
-    private func selectionButton(_ title: String, icon: String, count: Int, route: NavigationRoute) -> some View {
-        Button { store.route(to: route) } label: {
+    private var selectedRoute: Binding<NavigationRoute?> {
+        Binding {
+            store.selection.navigationRoute
+        } set: { route in
+            if let route { select(route) }
+        }
+    }
+
+    private var categoryItems: [SidebarItem] {
+        store.snapshot.categories.map { category in
+            .category(category, feeds: category.feeds.map(SidebarItem.feed))
+        }
+    }
+
+    private func sidebarRow(_ item: SidebarItem) -> some View {
+        Button {
+            select(item.route)
+        } label: {
             HStack(spacing: 8) {
-                Image(systemName: icon).frame(width: 16)
-                Text(title).lineLimit(1)
+                if let systemImage = item.systemImage {
+                    Image(systemName: systemImage)
+                        .frame(width: 16)
+                } else if let feedID = item.feedID {
+                    FeedIconView(
+                        feedID: feedID,
+                        feedName: item.title,
+                        accessibilityLabel: localization.text("article.feed_icon", "Feed icon")
+                    )
+                }
+                Text(item.title)
+                    .lineLimit(1)
                 Spacer(minLength: 0)
-                navigationCount(count)
             }
-            .navigationRow(selected: route.selection.map(store.selection.matchesRoute) ?? false)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .tag(item.route)
+        .badge(item.count)
     }
 
-    private func categoryButton(_ category: FeedCategory) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                if expandedCategories.contains(category.id) {
-                    expandedCategories.remove(category.id)
-                } else {
-                    expandedCategories.insert(category.id)
-                }
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold())
-                    .rotationEffect(.degrees(expandedCategories.contains(category.id) ? 90 : 0))
-                    .frame(width: 16)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(category.title)
-
-            Button { store.route(to: .category(category.id)) } label: {
-                HStack(spacing: 8) {
-                    Text(category.title).lineLimit(1)
-                    Spacer(minLength: 0)
-                    navigationCount(category.unreadCount)
-                }
-            }
-            .buttonStyle(.plain)
-        }
-        .navigationRow(selected: store.selection.matchesRoute(.category(category.id)))
-    }
-
-    private func feedButton(_ feed: Feed) -> some View {
-        Button { store.route(to: .feed(feed.id)) } label: {
-            HStack(spacing: 8) {
-                FeedIconView(
-                    feedID: feed.id,
-                    feedName: feed.title,
-                    accessibilityLabel: localization.text("article.feed_icon", "Feed icon")
-                )
-                Text(feed.title).lineLimit(1)
-                Spacer(minLength: 0)
-                navigationCount(feed.unreadCount)
-            }
-            .padding(.leading, 24)
-            .navigationRow(selected: store.selection.matchesRoute(.feed(feed.id)))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func navigationCount(_ count: Int) -> some View {
-        Text("\(count)")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
+    private func select(_ route: NavigationRoute) {
+        guard let selection = route.selection,
+              !store.selection.matchesRoute(selection) else { return }
+        store.route(to: route)
     }
 }
 
-private extension View {
-    func navigationRow(selected: Bool) -> some View {
-        self
-            .fontWeight(selected ? .semibold : .regular)
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-            .background(selected ? Color.accentColor.opacity(0.16) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+private struct SidebarItem: Identifiable {
+    enum ID: Hashable {
+        case all
+        case starred
+        case category(Int64)
+        case feed(Int64)
+    }
+
+    let id: ID
+    let route: NavigationRoute
+    let title: String
+    let count: Int
+    let systemImage: String?
+    let feedID: Int64?
+    let children: [SidebarItem]?
+
+    static func all(title: String, count: Int) -> SidebarItem {
+        SidebarItem(id: .all, route: .all, title: title, count: count, systemImage: "tray.full", feedID: nil, children: nil)
+    }
+
+    static func starred(title: String, count: Int) -> SidebarItem {
+        SidebarItem(id: .starred, route: .starred, title: title, count: count, systemImage: "star.fill", feedID: nil, children: nil)
+    }
+
+    static func category(_ category: FeedCategory, feeds: [SidebarItem]) -> SidebarItem {
+        SidebarItem(
+            id: .category(category.id),
+            route: .category(category.id),
+            title: category.title,
+            count: category.unreadCount,
+            systemImage: nil,
+            feedID: nil,
+            children: feeds.isEmpty ? nil : feeds
+        )
+    }
+
+    static func feed(_ feed: Feed) -> SidebarItem {
+        SidebarItem(
+            id: .feed(feed.id),
+            route: .feed(feed.id),
+            title: feed.title,
+            count: feed.unreadCount,
+            systemImage: nil,
+            feedID: feed.id,
+            children: nil
+        )
     }
 }
 
@@ -664,7 +662,7 @@ private struct ArticleItem: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
-        .background(selected ? Color.accentColor.opacity(0.16) : (hovered ? Color.primary.opacity(0.055) : Color.clear))
+        .background(interactionBackground)
         .onHover { hovered = $0 }
         .contextMenu { actionMenu }
         .disabled(store.isPending(article.id))
@@ -701,12 +699,8 @@ private struct ArticleItem: View {
             .padding(12)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(selected ? Color.accentColor.opacity(0.16) : Color.primary.opacity(hovered ? 0.07 : 0.035))
+        .background(interactionBackground)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
-        }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .contentShape(Rectangle())
@@ -774,6 +768,12 @@ private struct ArticleItem: View {
                 .help(localization.text("action.more", "More"))
                 .accessibilityLabel(localization.text("action.more", "More"))
         }
+    }
+
+    private var interactionBackground: Color {
+        if selected { return Color.accentColor.opacity(0.16) }
+        if hovered { return Color.primary.opacity(0.055) }
+        return .clear
     }
 
     @ViewBuilder

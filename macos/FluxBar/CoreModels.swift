@@ -63,6 +63,16 @@ struct ArticleSelection: Codable, Hashable, Sendable {
     func matchesRoute(_ other: ArticleSelection) -> Bool {
         kind == other.kind && id == other.id
     }
+
+    var navigationRoute: NavigationRoute? {
+        switch kind {
+        case "all", "unread": return .all
+        case "starred": return .starred
+        case "category": return id.map(NavigationRoute.category)
+        case "feed": return id.map(NavigationRoute.feed)
+        default: return nil
+        }
+    }
 }
 
 enum NavigationRoute: Hashable, Sendable {

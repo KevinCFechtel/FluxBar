@@ -9,6 +9,14 @@ final class RoutingTests: XCTestCase {
         XCTAssertNil(NavigationRoute.article(id: 11, url: nil).selection)
     }
 
+    func testSelectionsDriveNativeSidebarRoutes() {
+        XCTAssertEqual(ArticleSelection.all(unreadOnly: false).navigationRoute, .all)
+        XCTAssertEqual(ArticleSelection.unread.navigationRoute, .all)
+        XCTAssertEqual(ArticleSelection.starred.navigationRoute, .starred)
+        XCTAssertEqual(ArticleSelection.category(7, unreadOnly: false).navigationRoute, .category(7))
+        XCTAssertEqual(ArticleSelection.feed(9).navigationRoute, .feed(9))
+    }
+
     func testSpotlightIdentifiersResolveToSharedRoutes() {
         XCTAssertEqual(NavigationRoute(searchableIdentifier: "feed:42"), .feed(42))
         XCTAssertEqual(NavigationRoute(searchableIdentifier: "category:7"), .category(7))

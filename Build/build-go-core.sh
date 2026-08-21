@@ -12,7 +12,7 @@ if [[ "${#ARCHS[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
+DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 CLANG="$(xcrun --sdk macosx --find clang)"
 mkdir -p "${OUTPUT_DIR}"

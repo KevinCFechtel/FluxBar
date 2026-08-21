@@ -206,7 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     ) {
         self.sidebarVisible = sidebarVisible
         let size = popoverSize(sidebarVisible: sidebarVisible)
-        guard animated else {
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             popover.contentSize = size
             fallbackPanel?.setContentSize(size)
             return
