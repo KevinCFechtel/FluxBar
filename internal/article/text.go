@@ -62,6 +62,16 @@ func Extract(value, baseURL string, limit int) Preview {
 	}
 }
 
+// ResolveImageURL accepts absolute HTTP(S) image references and resolves
+// relative references against the article URL.
+func ResolveImageURL(candidate, baseURL string) string {
+	var base *url.URL
+	if parsed, err := url.Parse(baseURL); err == nil {
+		base = parsed
+	}
+	return resolveImageURL(candidate, base)
+}
+
 func firstImageURL(document *html.Node, baseURL string) string {
 	var base *url.URL
 	if parsed, err := url.Parse(baseURL); err == nil {

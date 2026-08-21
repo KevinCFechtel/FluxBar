@@ -63,6 +63,40 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         ), [1])
     }
 
+    func testHorizontalLayoutRebasePreservesQualifiedExposure() {
+        var tracker = qualifiedTracker()
+        tracker.rebase(
+            frames: [1: CGRect(x: 200, y: 0, width: 600, height: 100)],
+            unreadIDs: [1]
+        )
+
+        XCTAssertEqual(tracker.processScroll(
+            frames: [1: CGRect(x: 200, y: -101, width: 600, height: 100)],
+            viewport: viewport, unreadIDs: [1],
+            at: 1, offsetDelta: 40, userInitiated: true
+        ), [1])
+    }
+
+    func testLayoutRebaseDropsReadExposure() {
+        var tracker = qualifiedTracker()
+        tracker.rebase(frames: [1: row(y: 0)], unreadIDs: [])
+
+        XCTAssertTrue(tracker.processScroll(
+            frames: [1: row(y: -101)], viewport: viewport, unreadIDs: [],
+            at: 1, offsetDelta: 40, userInitiated: true
+        ).isEmpty)
+    }
+
+    func testLayoutRebaseDoesNotTreatVerticalCorrectionAsScrollover() {
+        var tracker = qualifiedTracker()
+        tracker.rebase(frames: [1: row(y: -101)], unreadIDs: [1])
+
+        XCTAssertTrue(tracker.processScroll(
+            frames: [1: row(y: -110)], viewport: viewport, unreadIDs: [1],
+            at: 1, offsetDelta: 9, userInitiated: true
+        ).isEmpty)
+    }
+
     func testProgrammaticAndScrollbarChangesDoNotMark() {
         var tracker = qualifiedTracker()
         XCTAssertTrue(tracker.processScroll(

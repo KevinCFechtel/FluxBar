@@ -118,6 +118,50 @@ func TestUnreadLoadsEachFeedIconOnceAndCachesIt(t *testing.T) {
 	}
 }
 
+func TestMapEntriesUsesImageEnclosureAsFallback(t *testing.T) {
+	entries := mapEntries(miniflux.Entries{{
+		ID:      10,
+		URL:     "https://news.example/articles/1",
+		Content: "<p>No inline image</p>",
+		Enclosures: miniflux.Enclosures{
+			{URL: "https://news.example/audio.mp3", MimeType: "audio/mpeg"},
+			{URL: "/images/cover.jpg", MimeType: " Image/JPEG; charset=binary "},
+		},
+	}})
+
+	if len(entries) != 1 || entries[0].ImageURL != "https://news.example/images/cover.jpg" {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestMapEntriesPrefersInlineImageOverEnclosure(t *testing.T) {
+	entries := mapEntries(miniflux.Entries{{
+		ID:         10,
+		URL:        "https://news.example/articles/1",
+		Content:    `<img src="/images/inline.jpg">`,
+		Enclosures: miniflux.Enclosures{{URL: "/images/attachment.jpg", MimeType: "image/jpeg"}},
+	}})
+
+	if len(entries) != 1 || entries[0].ImageURL != "https://news.example/images/inline.jpg" {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestMapEntriesIgnoresNonImageAndInvalidEnclosures(t *testing.T) {
+	entries := mapEntries(miniflux.Entries{{
+		ID:  10,
+		URL: "https://news.example/articles/1",
+		Enclosures: miniflux.Enclosures{
+			{URL: "https://news.example/video.mp4", MimeType: "video/mp4"},
+			{URL: "file:///tmp/image.jpg", MimeType: "image/jpeg"},
+		},
+	}})
+
+	if len(entries) != 1 || entries[0].ImageURL != "" {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
 func TestMarkRead(t *testing.T) {
 	client := &fakeClient{iconCalls: make(map[int64]int)}
 	service := NewWithClient(client, nil)

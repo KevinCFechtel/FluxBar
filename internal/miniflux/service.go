@@ -291,6 +291,10 @@ func mapEntries(sources miniflux.Entries) []model.Entry {
 			}
 		}
 		preview := article.Extract(source.Content, source.URL, article.PreviewLimit)
+		imageURL := preview.ImageURL
+		if imageURL == "" {
+			imageURL = firstImageEnclosureURL(source.Enclosures, source.URL)
+		}
 		entries = append(entries, model.Entry{
 			ID:          source.ID,
 			Title:       source.Title,
@@ -301,12 +305,28 @@ func mapEntries(sources miniflux.Entries) []model.Entry {
 			CategoryID:  categoryID,
 			PublishedAt: source.Date,
 			Preview:     preview.Text,
-			ImageURL:    preview.ImageURL,
+			ImageURL:    imageURL,
 			Status:      source.Status,
 			Starred:     source.Starred,
 		})
 	}
 	return entries
+}
+
+func firstImageEnclosureURL(enclosures miniflux.Enclosures, articleURL string) string {
+	for _, enclosure := range enclosures {
+		if enclosure == nil {
+			continue
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(enclosure.MimeType, ";", 2)[0]))
+		if !strings.HasPrefix(mediaType, "image/") {
+			continue
+		}
+		if imageURL := article.ResolveImageURL(enclosure.URL, articleURL); imageURL != "" {
+			return imageURL
+		}
+	}
+	return ""
 }
 
 func mapNavigation(categories miniflux.Categories, feeds miniflux.Feeds, unreadCounters map[int64]int) ([]model.Category, int) {

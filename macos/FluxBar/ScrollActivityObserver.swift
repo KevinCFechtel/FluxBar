@@ -4,13 +4,16 @@ import SwiftUI
 struct ScrollActivity {
     let offsetDelta: CGFloat
     let userInitiated: Bool
+    let epoch: UInt64
 }
 
 struct ScrollActivityObserver: NSViewRepresentable {
+    let isPaused: Bool
+    let epoch: UInt64
     let onActivity: (ScrollActivity) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onActivity: onActivity)
+        Coordinator(isPaused: isPaused, epoch: epoch, onActivity: onActivity)
     }
 
     func makeNSView(context: Context) -> NSView {
@@ -21,6 +24,7 @@ struct ScrollActivityObserver: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.onActivity = onActivity
+        context.coordinator.update(isPaused: isPaused, epoch: epoch)
         DispatchQueue.main.async { context.coordinator.attach(to: view.enclosingScrollView) }
     }
 
@@ -35,9 +39,21 @@ struct ScrollActivityObserver: NSViewRepresentable {
         private var eventMonitor: Any?
         private var lastOffsetY: CGFloat?
         private var lastVerticalWheelTime: TimeInterval = -.infinity
+        private var isPaused: Bool
+        private var epoch: UInt64
 
-        init(onActivity: @escaping (ScrollActivity) -> Void) {
+        init(isPaused: Bool, epoch: UInt64, onActivity: @escaping (ScrollActivity) -> Void) {
+            self.isPaused = isPaused
+            self.epoch = epoch
             self.onActivity = onActivity
+        }
+
+        func update(isPaused: Bool, epoch: UInt64) {
+            guard self.isPaused != isPaused || self.epoch != epoch else { return }
+            self.isPaused = isPaused
+            self.epoch = epoch
+            lastOffsetY = scrollView?.contentView.bounds.origin.y
+            lastVerticalWheelTime = -.infinity
         }
 
         func attach(to scrollView: NSScrollView?) {
@@ -75,7 +91,8 @@ struct ScrollActivityObserver: NSViewRepresentable {
         }
 
         private func record(_ event: NSEvent) {
-            guard let scrollView,
+            guard !isPaused,
+                  let scrollView,
                   event.window === scrollView.window,
                   abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX) else { return }
             let point = scrollView.convert(event.locationInWindow, from: nil)
@@ -91,8 +108,14 @@ struct ScrollActivityObserver: NSViewRepresentable {
                 return
             }
             lastOffsetY = offsetY
+            guard !isPaused else {
+                lastVerticalWheelTime = -.infinity
+                return
+            }
+            let offsetDelta = offsetY - previous
+            guard offsetDelta != 0 else { return }
             let recentWheel = ProcessInfo.processInfo.systemUptime - lastVerticalWheelTime < 0.25
-            onActivity(ScrollActivity(offsetDelta: offsetY - previous, userInitiated: recentWheel))
+            onActivity(ScrollActivity(offsetDelta: offsetDelta, userInitiated: recentWheel, epoch: epoch))
         }
     }
 }

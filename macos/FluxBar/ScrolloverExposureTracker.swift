@@ -40,6 +40,16 @@ struct ScrolloverExposureTracker {
         exposures.removeAll()
     }
 
+    mutating func rebase(frames: [Int64: CGRect], unreadIDs: Set<Int64>) {
+        exposures = exposures.filter { unreadIDs.contains($0.key) }
+        for (id, frame) in frames {
+            guard unreadIDs.contains(id), var exposure = exposures[id] else { continue }
+            exposure.processedFrame = frame
+            exposure.currentFrame = frame
+            exposures[id] = exposure
+        }
+    }
+
     mutating func observe(
         frames: [Int64: CGRect],
         viewport: CGRect,

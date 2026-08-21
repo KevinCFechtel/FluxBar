@@ -38,7 +38,7 @@ private struct ArticleFramePreferenceKey: PreferenceKey {
 struct PopoverContentView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var localization: Localization
-    let layoutChanged: (Bool) -> Void
+    let layoutChanged: (Bool, @escaping () -> Void) -> Void
     let dismiss: () -> Void
     @State private var sidebarVisible = false
 
@@ -73,7 +73,7 @@ private struct ArticlePane: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var localization: Localization
     @Binding var sidebarVisible: Bool
-    let layoutChanged: (Bool) -> Void
+    let layoutChanged: (Bool, @escaping () -> Void) -> Void
     let dismiss: () -> Void
     @State private var exposureTracker = ScrolloverExposureTracker()
     @State private var articleFrames: [Int64: CGRect] = [:]
@@ -81,6 +81,9 @@ private struct ArticlePane: View {
     @State private var trackerPresentationRevision: UInt64 = 0
     @State private var selectedArticleID: Int64?
     @State private var suppressScrolloverUntil: TimeInterval = 0
+    @State private var layoutChangeGeneration: UInt64 = 0
+    @State private var scrollActivityEpoch: UInt64 = 0
+    @State private var scrollActivityPaused = false
     private let exposureTimer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -130,10 +133,7 @@ private struct ArticlePane: View {
     private var header: some View {
         HStack(spacing: 8) {
             Button {
-                withAnimation(.easeInOut(duration: PopoverLayout.sidebarAnimationDuration)) {
-                    sidebarVisible.toggle()
-                }
-                layoutChanged(sidebarVisible)
+                toggleSidebar()
             } label: {
                 Image(systemName: "sidebar.left")
             }
@@ -254,7 +254,10 @@ private struct ArticlePane: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: store.articleListStyle == .row ? 0 : 4) {
-                            ScrollActivityObserver { activity in
+                            ScrollActivityObserver(
+                                isPaused: scrollActivityPaused,
+                                epoch: scrollActivityEpoch
+                            ) { activity in
                                 DispatchQueue.main.async {
                                     processScroll(activity)
                                 }
@@ -296,7 +299,15 @@ private struct ArticlePane: View {
                         observeExposure(at: Date.timeIntervalSinceReferenceDate)
                     }
                     .onChange(of: geometry.size) { size in
+                        let previousSize = articleViewport.size
                         articleViewport = CGRect(origin: .zero, size: size)
+                        guard !scrollActivityPaused,
+                              ProcessInfo.processInfo.systemUptime >= suppressScrolloverUntil else { return }
+                        if abs(previousSize.height - size.height) < 0.5 {
+                            exposureTracker.rebase(frames: articleFrames, unreadIDs: unreadArticleIDs)
+                            observeExposure(at: Date.timeIntervalSinceReferenceDate)
+                            return
+                        }
                         exposureTracker.reset()
                         observeExposure(at: Date.timeIntervalSinceReferenceDate)
                     }
@@ -311,18 +322,41 @@ private struct ArticlePane: View {
 
     private func setArticleListStyle(_ style: ArticleListStyle) {
         store.setArticleListStyle(style)
-        layoutChanged(sidebarVisible)
+        layoutChanged(sidebarVisible) {}
+    }
+
+    private func toggleSidebar() {
+        layoutChangeGeneration &+= 1
+        let generation = layoutChangeGeneration
+        scrollActivityEpoch &+= 1
+        scrollActivityPaused = true
+        suppressScrolloverUntil = .infinity
+        withAnimation(.easeInOut(duration: PopoverLayout.sidebarAnimationDuration)) {
+            sidebarVisible.toggle()
+        }
+        layoutChanged(sidebarVisible) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard generation == layoutChangeGeneration else { return }
+                exposureTracker.rebase(frames: articleFrames, unreadIDs: unreadArticleIDs)
+                scrollActivityEpoch &+= 1
+                suppressScrolloverUntil = ProcessInfo.processInfo.systemUptime
+                scrollActivityPaused = false
+                observeExposure(at: Date.timeIntervalSinceReferenceDate)
+            }
+        }
     }
 
     private func observeExposure(at time: TimeInterval) {
         guard store.isPopoverVisible,
               !store.isNavigating,
               store.markReadOnScrolloverEnabled,
+              !scrollActivityPaused,
+              ProcessInfo.processInfo.systemUptime >= suppressScrolloverUntil,
               !articleViewport.isEmpty else { return }
         exposureTracker.observe(
             frames: articleFrames,
             viewport: articleViewport,
-            unreadIDs: Set(store.snapshot.entries.filter { !$0.isRead }.map(\.id)),
+            unreadIDs: unreadArticleIDs,
             at: time
         )
     }
@@ -331,9 +365,10 @@ private struct ArticlePane: View {
         guard store.isPopoverVisible,
               !store.isNavigating,
               store.markReadOnScrolloverEnabled,
+              !scrollActivityPaused,
+              activity.epoch == scrollActivityEpoch,
               !articleViewport.isEmpty else { return }
         guard ProcessInfo.processInfo.systemUptime >= suppressScrolloverUntil else {
-            exposureTracker.reset()
             return
         }
         guard trackerPresentationRevision == store.listPresentationRevision else {
@@ -344,7 +379,7 @@ private struct ArticlePane: View {
         let marked = exposureTracker.processScroll(
             frames: articleFrames,
             viewport: articleViewport,
-            unreadIDs: Set(store.snapshot.entries.filter { !$0.isRead }.map(\.id)),
+            unreadIDs: unreadArticleIDs,
             at: Date.timeIntervalSinceReferenceDate,
             offsetDelta: activity.offsetDelta,
             userInitiated: activity.userInitiated
@@ -352,6 +387,10 @@ private struct ArticlePane: View {
         if !marked.isEmpty {
             store.markReadAutomatically(marked)
         }
+    }
+
+    private var unreadArticleIDs: Set<Int64> {
+        Set(store.snapshot.entries.filter { !$0.isRead }.map(\.id))
     }
 
     private func handleKeyboardCommand(_ command: ArticleKeyboardCommand, proxy: ScrollViewProxy) {
