@@ -1,0 +1,116 @@
+package inbox
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+
+	"github.com/KevinCFechtel/FluxBar/internal/model"
+)
+
+type fakeRemote struct {
+	mu          sync.Mutex
+	snapshot    model.BrowseSnapshot
+	browseError error
+	readCalls   []bool
+	starred     bool
+	toggleCalls int
+}
+
+func (remote *fakeRemote) Browse(context.Context, model.Selection) (model.BrowseSnapshot, error) {
+	if remote.browseError != nil {
+		return model.BrowseSnapshot{}, remote.browseError
+	}
+	return remote.snapshot, nil
+}
+func (remote *fakeRemote) SetReadBatch(_ context.Context, _ []int64, read bool) error {
+	remote.mu.Lock()
+	defer remote.mu.Unlock()
+	remote.readCalls = append(remote.readCalls, read)
+	return nil
+}
+func (remote *fakeRemote) EntryState(context.Context, int64) (RemoteEntryState, error) {
+	remote.mu.Lock()
+	defer remote.mu.Unlock()
+	return RemoteEntryState{Starred: remote.starred}, nil
+}
+func (remote *fakeRemote) ToggleStarred(context.Context, int64) error {
+	remote.mu.Lock()
+	defer remote.mu.Unlock()
+	remote.starred = !remote.starred
+	remote.toggleCalls++
+	return nil
+}
+func (*fakeRemote) FeedIcon(context.Context, int64, string) ([]byte, []byte) { return nil, nil }
+
+func TestSyncWritesAndRetainsLocalSnapshotOffline(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	remote := &fakeRemote{snapshot: testSnapshot()}
+	service := NewService(store, remote, "account", false, nil)
+	if _, err := service.Sync(ctx, model.Selection{Kind: model.SelectionAll, UnreadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	remote.browseError = errors.New("offline")
+	snapshot, err := service.Sync(ctx, model.Selection{Kind: model.SelectionAll, UnreadOnly: true})
+	if err == nil {
+		t.Fatal("offline sync returned no error")
+	}
+	if len(snapshot.Entries) != 2 {
+		t.Fatalf("offline snapshot = %#v", snapshot)
+	}
+}
+
+func TestStarredReconciliationUsesRemoteDesiredState(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	remote := &fakeRemote{snapshot: testSnapshot(), starred: true}
+	service := NewService(store, remote, "account", false, nil)
+	if err := store.SetStarred(ctx, "account", 1, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if remote.toggleCalls != 0 {
+		t.Fatalf("matching remote state toggled %d times", remote.toggleCalls)
+	}
+	if err := store.SetStarred(ctx, "account", 1, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if remote.toggleCalls != 1 || remote.starred {
+		t.Fatalf("remote starred=%t toggles=%d", remote.starred, remote.toggleCalls)
+	}
+}
+
+func TestSequentialAutomaticReadBatchesRetainEarlierRows(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(store, &fakeRemote{snapshot: testSnapshot()}, "account", false, nil)
+	selection := model.Selection{Kind: model.SelectionAll, UnreadOnly: true}
+
+	first, _, err := service.MarkRead(ctx, selection, []int64{1}, nil, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Entries) != 2 || first.Total != 1 {
+		t.Fatalf("first batch: entries=%#v total=%d", first.Entries, first.Total)
+	}
+	second, _, err := service.MarkRead(ctx, selection, []int64{2}, []int64{1}, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Entries) != 2 || second.Total != 0 || second.Entries[0].Status != "read" || second.Entries[1].Status != "read" {
+		t.Fatalf("second batch: entries=%#v total=%d", second.Entries, second.Total)
+	}
+}

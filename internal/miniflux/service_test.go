@@ -54,6 +54,17 @@ func (client *fakeClient) ToggleStarredContext(_ context.Context, entryID int64)
 	return nil
 }
 
+func (client *fakeClient) EntryContext(_ context.Context, entryID int64) (*miniflux.Entry, error) {
+	if client.entries != nil {
+		for _, entry := range client.entries.Entries {
+			if entry != nil && entry.ID == entryID {
+				return entry, nil
+			}
+		}
+	}
+	return &miniflux.Entry{ID: entryID}, nil
+}
+
 func (client *fakeClient) EntriesContext(_ context.Context, filter *miniflux.Filter) (*miniflux.EntryResultSet, error) {
 	filterCopy := *filter
 	client.lastFilter = &filterCopy

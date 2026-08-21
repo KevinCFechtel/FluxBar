@@ -1,0 +1,90 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "entity.category.type" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } }
+      }
+    },
+    "entity.feed.type" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } }
+      }
+    },
+    "intent.category.description" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Eine bestimmte Kategorie in FluxBar öffnen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a specific category in FluxBar." } }
+      }
+    },
+    "intent.category.parameter" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Category" } }
+      }
+    },
+    "intent.category.title" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Kategorie öffnen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Category" } }
+      }
+    },
+    "intent.feed.description" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Einen bestimmten Feed in FluxBar öffnen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open a specific feed in FluxBar." } }
+      }
+    },
+    "intent.feed.parameter" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Feed" } }
+      }
+    },
+    "intent.feed.title" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Feed öffnen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Feed" } }
+      }
+    },
+    "intent.open.description" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Den FluxBar-Posteingang öffnen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the FluxBar inbox." } }
+      }
+    },
+    "intent.open.title" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxBar öffnen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open FluxBar" } }
+      }
+    },
+    "intent.refresh.description" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxBar mit Miniflux aktualisieren." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh FluxBar from Miniflux." } }
+      }
+    },
+    "intent.refresh.title" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "FluxBar aktualisieren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh FluxBar" } }
+      }
+    },
+    "intent.starred.description" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Markierte Artikel in FluxBar öffnen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open starred articles in FluxBar." } }
+      }
+    },
+    "intent.starred.title" : {
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Markierte anzeigen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Starred" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/KevinCFechtel/FluxBar/internal/inbox"
 	"github.com/KevinCFechtel/FluxBar/internal/localization"
 	fluxminiflux "github.com/KevinCFechtel/FluxBar/internal/miniflux"
 	"github.com/KevinCFechtel/FluxBar/internal/model"
@@ -24,9 +27,16 @@ type Request struct {
 	Locales                 []string        `json:"locales,omitempty"`
 	Key                     string          `json:"key,omitempty"`
 	Fallback                string          `json:"fallback,omitempty"`
+	OneFallback             string          `json:"oneFallback,omitempty"`
+	OtherFallback           string          `json:"otherFallback,omitempty"`
+	Count                   int             `json:"count,omitempty"`
 	Selection               model.Selection `json:"selection,omitempty"`
 	EntryID                 int64           `json:"entryID,omitempty"`
+	EntryIDs                []int64         `json:"entryIDs,omitempty"`
+	RetainEntryIDs          []int64         `json:"retainEntryIDs,omitempty"`
 	Read                    bool            `json:"read,omitempty"`
+	MutationSource          string          `json:"mutationSource,omitempty"`
+	MutationID              string          `json:"mutationID,omitempty"`
 	CurrentStarred          bool            `json:"currentStarred,omitempty"`
 	DesiredStarred          bool            `json:"desiredStarred,omitempty"`
 	FeedID                  int64           `json:"feedID,omitempty"`
@@ -34,11 +44,12 @@ type Request struct {
 }
 
 type Response struct {
-	OK       bool                  `json:"ok"`
-	Error    string                `json:"error,omitempty"`
-	Text     string                `json:"text,omitempty"`
-	Snapshot *model.BrowseSnapshot `json:"snapshot,omitempty"`
-	Icon     *Icon                 `json:"icon,omitempty"`
+	OK       bool                   `json:"ok"`
+	Error    string                 `json:"error,omitempty"`
+	Text     string                 `json:"text,omitempty"`
+	Snapshot *model.BrowseSnapshot  `json:"snapshot,omitempty"`
+	Icon     *Icon                  `json:"icon,omitempty"`
+	Receipt  *inbox.MutationReceipt `json:"receipt,omitempty"`
 }
 
 type Icon struct {
@@ -48,7 +59,8 @@ type Icon struct {
 
 type Runtime struct {
 	mu                      sync.Mutex
-	service                 *fluxminiflux.Service
+	engine                  *inbox.Service
+	store                   *inbox.Store
 	logger                  *log.Logger
 	configurationGeneration int64
 }
@@ -77,6 +89,13 @@ func (runtime *Runtime) handle(request Request) Response {
 		}
 		return Response{OK: true, Text: localizer.Text(request.Key, request.Fallback)}
 	}
+	if request.Operation == "localize_plural" {
+		localizer, err := localization.New(request.Locales...)
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true, Text: localizer.Plural(request.Key, request.OneFallback, request.OtherFallback, request.Count, map[string]any{"Count": request.Count})}
+	}
 
 	switch request.Operation {
 	case "configure":
@@ -88,69 +107,159 @@ func (runtime *Runtime) handle(request Request) Response {
 		if request.NewestFirst {
 			sortOrder = fluxminiflux.SortNewestFirst
 		}
-		service := fluxminiflux.NewWithSortOrder(server, strings.TrimSpace(request.APIKey), sortOrder, runtime.logger)
+		store, err := runtime.currentStore()
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		apiKey := strings.TrimSpace(request.APIKey)
+		accountID := inbox.AccountID(server, apiKey)
+		if err := store.EnsureAccount(context.Background(), accountID, server); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		remote := fluxminiflux.NewWithSortOrder(server, apiKey, sortOrder, runtime.logger)
+		engine := inbox.NewService(store, remote, accountID, request.NewestFirst, runtime.logger)
 		runtime.mu.Lock()
 		if request.ConfigurationGeneration >= runtime.configurationGeneration {
-			runtime.service = service
+			runtime.engine = engine
 			runtime.configurationGeneration = request.ConfigurationGeneration
 		}
 		runtime.mu.Unlock()
 		return Response{OK: true}
+	case "local_snapshot":
+		return runtime.localSnapshot(runtime.currentEngine(), request.Selection, request.RetainEntryIDs...)
 	case "refresh":
-		return runtime.snapshot(runtime.currentService(), request.Selection)
+		engine := runtime.currentEngine()
+		if engine == nil {
+			return notConfigured()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		snapshot, err := engine.Sync(ctx, request.Selection, request.RetainEntryIDs...)
+		if err != nil {
+			if snapshot.Version > 0 {
+				return Response{OK: true, Error: err.Error(), Snapshot: &snapshot}
+			}
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true, Snapshot: &snapshot}
 	case "set_read":
-		service := runtime.currentService()
-		if service == nil {
+		engine := runtime.currentEngine()
+		if engine == nil {
 			return notConfigured()
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ids := append([]int64(nil), request.EntryIDs...)
+		if len(ids) == 0 && request.EntryID > 0 {
+			ids = []int64{request.EntryID}
+		}
+		if len(ids) == 0 {
+			return Response{OK: false, Error: "missing entry IDs"}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := service.SetRead(ctx, request.EntryID, request.Read); err != nil {
+		snapshot, receipt, err := engine.MarkRead(ctx, request.Selection, ids, request.RetainEntryIDs, request.Read, request.MutationSource == "automatic")
+		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return runtime.snapshot(service, request.Selection)
+		return Response{OK: true, Snapshot: &snapshot, Receipt: receipt}
 	case "set_starred":
-		service := runtime.currentService()
-		if service == nil {
+		engine := runtime.currentEngine()
+		if engine == nil {
 			return notConfigured()
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := service.SetStarred(ctx, request.EntryID, request.CurrentStarred, request.DesiredStarred); err != nil {
+		snapshot, err := engine.SetStarred(ctx, request.Selection, request.EntryID, request.DesiredStarred, request.RetainEntryIDs)
+		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return runtime.snapshot(service, request.Selection)
+		return Response{OK: true, Snapshot: &snapshot}
+	case "undo_read":
+		engine := runtime.currentEngine()
+		if engine == nil {
+			return notConfigured()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		snapshot, err := engine.Undo(ctx, request.Selection, request.MutationID, request.RetainEntryIDs)
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true, Snapshot: &snapshot}
+	case "discard_undo":
+		engine := runtime.currentEngine()
+		if engine == nil {
+			return notConfigured()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := engine.DiscardUndo(ctx, request.MutationID); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true}
+	case "flush_pending":
+		engine := runtime.currentEngine()
+		if engine == nil {
+			return notConfigured()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := engine.Flush(ctx); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return runtime.localSnapshot(engine, request.Selection, request.RetainEntryIDs...)
 	case "feed_icon":
-		service := runtime.currentService()
-		if service == nil {
+		engine := runtime.currentEngine()
+		if engine == nil {
 			return notConfigured()
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		regular, dark := service.FeedIcon(ctx, request.FeedID, request.FeedName)
+		regular, dark := engine.FeedIcon(ctx, request.FeedID, request.FeedName)
 		return Response{OK: true, Icon: &Icon{Regular: regular, Dark: dark}}
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unsupported operation %q", request.Operation)}
 	}
 }
 
-func (runtime *Runtime) currentService() *fluxminiflux.Service {
+func (runtime *Runtime) currentEngine() *inbox.Service {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
-	return runtime.service
+	return runtime.engine
 }
 
-func (runtime *Runtime) snapshot(service *fluxminiflux.Service, selection model.Selection) Response {
-	if service == nil {
+func (runtime *Runtime) localSnapshot(engine *inbox.Service, selection model.Selection, retainIDs ...int64) Response {
+	if engine == nil {
 		return notConfigured()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	snapshot, err := service.Browse(ctx, selection)
+	snapshot, err := engine.LocalSnapshot(ctx, selection, retainIDs...)
 	if err != nil {
 		return Response{OK: false, Error: err.Error()}
 	}
 	return Response{OK: true, Snapshot: &snapshot}
+}
+
+func (runtime *Runtime) currentStore() (*inbox.Store, error) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.store != nil {
+		return runtime.store, nil
+	}
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("Anwendungsdaten-Verzeichnis bestimmen: %w", err)
+	}
+	directory = filepath.Join(directory, "FluxBar")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return nil, fmt.Errorf("Anwendungsdaten-Verzeichnis anlegen: %w", err)
+	}
+	store, err := inbox.OpenStore(filepath.Join(directory, "inbox.sqlite3"))
+	if err != nil {
+		return nil, err
+	}
+	runtime.store = store
+	return store, nil
 }
 
 func notConfigured() Response {

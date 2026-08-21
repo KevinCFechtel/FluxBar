@@ -21,7 +21,7 @@ actor ImagePipeline {
         configuration.urlCache = URLCache(
             memoryCapacity: 32 * 1024 * 1024,
             diskCapacity: 256 * 1024 * 1024,
-            diskPath: "FluxNewsThumbnails"
+            diskPath: "FluxBarThumbnails"
         )
         configuration.requestCachePolicy = .returnCacheDataElseLoad
         configuration.timeoutIntervalForRequest = 12
@@ -78,11 +78,14 @@ actor ImagePipeline {
 struct ThumbnailView: View {
     let url: URL?
     let accessibilityLabel: String
+    var width: CGFloat = 120
+    var height: CGFloat = 84
+    var cornerRadius: CGFloat = 7
     @State private var image: NSImage?
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 7)
+            RoundedRectangle(cornerRadius: cornerRadius)
                 .fill(Color.secondary.opacity(0.10))
             if let image {
                 Image(nsImage: image)
@@ -94,8 +97,8 @@ struct ThumbnailView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .frame(width: 244, height: 171)
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         .accessibilityLabel(accessibilityLabel)
         .task(id: url) {
             image = nil

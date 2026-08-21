@@ -14,6 +14,7 @@ import (
 
 	"github.com/KevinCFechtel/FluxBar/internal/article"
 	"github.com/KevinCFechtel/FluxBar/internal/icons"
+	"github.com/KevinCFechtel/FluxBar/internal/inbox"
 	"github.com/KevinCFechtel/FluxBar/internal/model"
 	miniflux "miniflux.app/v2/client"
 )
@@ -29,6 +30,7 @@ const (
 
 type client interface {
 	EntriesContext(context.Context, *miniflux.Filter) (*miniflux.EntryResultSet, error)
+	EntryContext(context.Context, int64) (*miniflux.Entry, error)
 	UpdateEntriesContext(context.Context, []int64, string) error
 	FeedIconContext(context.Context, int64) (*miniflux.FeedIcon, error)
 	CategoriesContext(context.Context) (miniflux.Categories, error)
@@ -215,12 +217,34 @@ func (service *Service) Browse(ctx context.Context, selection model.Selection) (
 }
 
 func (service *Service) SetRead(ctx context.Context, entryID int64, read bool) error {
+	return service.SetReadBatch(ctx, []int64{entryID}, read)
+}
+
+func (service *Service) SetReadBatch(ctx context.Context, entryIDs []int64, read bool) error {
 	status := miniflux.EntryStatusUnread
 	if read {
 		status = miniflux.EntryStatusRead
 	}
-	if err := service.client.UpdateEntriesContext(ctx, []int64{entryID}, status); err != nil {
+	if err := service.client.UpdateEntriesContext(ctx, entryIDs, status); err != nil {
 		return fmt.Errorf("Miniflux-Lesestatus aktualisieren: %w", err)
+	}
+	return nil
+}
+
+func (service *Service) EntryState(ctx context.Context, entryID int64) (inbox.RemoteEntryState, error) {
+	entry, err := service.client.EntryContext(ctx, entryID)
+	if err != nil {
+		return inbox.RemoteEntryState{}, fmt.Errorf("Miniflux-Eintrag laden: %w", err)
+	}
+	if entry == nil {
+		return inbox.RemoteEntryState{}, fmt.Errorf("Miniflux-Eintrag laden: leere Antwort")
+	}
+	return inbox.RemoteEntryState{Starred: entry.Starred}, nil
+}
+
+func (service *Service) ToggleStarred(ctx context.Context, entryID int64) error {
+	if err := service.client.ToggleStarredContext(ctx, entryID); err != nil {
+		return fmt.Errorf("Miniflux-Markierung aktualisieren: %w", err)
 	}
 	return nil
 }

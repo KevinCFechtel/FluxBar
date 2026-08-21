@@ -59,14 +59,14 @@ func TestPluralization(t *testing.T) {
 		count    int
 		expected string
 	}{
-		{count: 1, expected: "FluxNews — 1 ungelesener Artikel"},
-		{count: 2, expected: "FluxNews — 2 ungelesene Artikel"},
+		{count: 1, expected: "FluxBar — 1 ungelesener Artikel"},
+		{count: 2, expected: "FluxBar — 2 ungelesene Artikel"},
 	}
 	for _, test := range tests {
 		actual := localizer.Plural(
 			"status.unread_count",
-			"FluxNews — {{.Count}} unread article",
-			"FluxNews — {{.Count}} unread articles",
+			"FluxBar — {{.Count}} unread article",
+			"FluxBar — {{.Count}} unread articles",
 			test.count,
 			map[string]any{"Count": test.count},
 		)

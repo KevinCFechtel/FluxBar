@@ -1,0 +1,314 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* FluxBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* FluxBarApp.swift */; };
+		100000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* AppDelegate.swift */; };
+		100000000000000000000003 /* CoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* CoreModels.swift */; };
+		100000000000000000000004 /* GoCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* GoCore.swift */; };
+		100000000000000000000005 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* Localization.swift */; };
+		100000000000000000000006 /* CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* CredentialStore.swift */; };
+		100000000000000000000007 /* BrowserStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* BrowserStore.swift */; };
+		100000000000000000000008 /* ImageLoading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* ImageLoading.swift */; };
+		100000000000000000000009 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* PopoverContentView.swift */; };
+		10000000000000000000000E /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* ScrolloverExposureTracker.swift */; };
+		10000000000000000000000F /* ScrollActivityObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* ScrollActivityObserver.swift */; };
+		100000000000000000000010 /* ScrolloverExposureTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* ScrolloverExposureTrackerTests.swift */; };
+		100000000000000000000011 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* ScrolloverExposureTracker.swift */; };
+		100000000000000000000012 /* AppRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* AppRouting.swift */; };
+		100000000000000000000013 /* AppIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* AppIntents.swift */; };
+		100000000000000000000014 /* GlobalShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* GlobalShortcut.swift */; };
+		100000000000000000000015 /* KeyboardCommandObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* KeyboardCommandObserver.swift */; };
+		100000000000000000000016 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000016 /* Localizable.xcstrings */; };
+		100000000000000000000017 /* AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* AppShortcuts.strings */; };
+		100000000000000000000018 /* RoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* RoutingTests.swift */; };
+		100000000000000000000019 /* CoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* CoreModels.swift */; };
+		10000000000000000000000A /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* AppIcon.icns */; };
+		10000000000000000000000D /* FluxBarTemplate.svg in Resources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* FluxBarTemplate.svg */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0B0000000000000000000001 /* PBXContainerItemProxy */ = {isa = PBXContainerItemProxy; containerPortal = 700000000000000000000001 /* Project object */; proxyType = 1; remoteGlobalIDString = 500000000000000000000001; remoteInfo = FluxBar; };
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* FluxBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FluxBarApp.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* CoreModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreModels.swift; sourceTree = "<group>"; };
+		200000000000000000000004 /* GoCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoCore.swift; sourceTree = "<group>"; };
+		200000000000000000000005 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		200000000000000000000006 /* CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredentialStore.swift; sourceTree = "<group>"; };
+		200000000000000000000007 /* BrowserStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStore.swift; sourceTree = "<group>"; };
+		200000000000000000000008 /* ImageLoading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLoading.swift; sourceTree = "<group>"; };
+		200000000000000000000009 /* PopoverContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverContentView.swift; sourceTree = "<group>"; };
+		20000000000000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		20000000000000000000000B /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; name = AppIcon.icns; path = ../Build/AppIcon.icns; sourceTree = "<group>"; };
+		20000000000000000000000C /* FluxBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluxBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		20000000000000000000000D /* FluxBarTemplate.svg */ = {isa = PBXFileReference; lastKnownFileType = image.svg; path = FluxBarTemplate.svg; sourceTree = "<group>"; };
+		20000000000000000000000E /* ScrolloverExposureTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; };
+		20000000000000000000000F /* ScrollActivityObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollActivityObserver.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* ScrolloverExposureTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTrackerTests.swift; sourceTree = "<group>"; };
+		200000000000000000000011 /* FluxBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000012 /* AppRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouting.swift; sourceTree = "<group>"; };
+		200000000000000000000013 /* AppIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIntents.swift; sourceTree = "<group>"; };
+		200000000000000000000014 /* GlobalShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalShortcut.swift; sourceTree = "<group>"; };
+		200000000000000000000015 /* KeyboardCommandObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardCommandObserver.swift; sourceTree = "<group>"; };
+		200000000000000000000016 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		200000000000000000000018 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/AppShortcuts.strings; sourceTree = "<group>"; };
+		200000000000000000000019 /* de */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = de; path = de.lproj/AppShortcuts.strings; sourceTree = "<group>"; };
+		20000000000000000000001A /* RoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		300000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000004 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		400000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				400000000000000000000002 /* FluxBar */,
+				400000000000000000000004 /* FluxBarTests */,
+				20000000000000000000000B /* AppIcon.icns */,
+				400000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		400000000000000000000002 /* FluxBar */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* FluxBarApp.swift */,
+				200000000000000000000002 /* AppDelegate.swift */,
+				200000000000000000000003 /* CoreModels.swift */,
+				200000000000000000000004 /* GoCore.swift */,
+				200000000000000000000005 /* Localization.swift */,
+				200000000000000000000006 /* CredentialStore.swift */,
+				200000000000000000000007 /* BrowserStore.swift */,
+				200000000000000000000008 /* ImageLoading.swift */,
+				200000000000000000000009 /* PopoverContentView.swift */,
+				20000000000000000000000E /* ScrolloverExposureTracker.swift */,
+				20000000000000000000000F /* ScrollActivityObserver.swift */,
+				200000000000000000000012 /* AppRouting.swift */,
+				200000000000000000000013 /* AppIntents.swift */,
+				200000000000000000000014 /* GlobalShortcut.swift */,
+				200000000000000000000015 /* KeyboardCommandObserver.swift */,
+				200000000000000000000016 /* Localizable.xcstrings */,
+				200000000000000000000017 /* AppShortcuts.strings */,
+				20000000000000000000000A /* Info.plist */,
+				20000000000000000000000D /* FluxBarTemplate.svg */,
+			);
+			path = FluxBar;
+			sourceTree = "<group>";
+		};
+		400000000000000000000004 /* FluxBarTests */ = {
+			isa = PBXGroup;
+			children = (200000000000000000000010 /* ScrolloverExposureTrackerTests.swift */, 20000000000000000000001A /* RoutingTests.swift */);
+			path = FluxBarTests;
+			sourceTree = "<group>";
+		};
+		400000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (20000000000000000000000C /* FluxBar.app */, 200000000000000000000011 /* FluxBarTests.xctest */);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* FluxBar */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000002 /* Build configuration list for PBXNativeTarget "FluxBar" */;
+			buildPhases = (
+				600000000000000000000001 /* Build Go Core */,
+				300000000000000000000002 /* Sources */,
+				300000000000000000000001 /* Frameworks */,
+				300000000000000000000003 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = FluxBar;
+			productName = FluxBar;
+			productReference = 20000000000000000000000C /* FluxBar.app */;
+			productType = "com.apple.product-type.application";
+		};
+		500000000000000000000002 /* FluxBarTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 900000000000000000000003 /* Build configuration list for PBXNativeTarget "FluxBarTests" */;
+			buildPhases = (300000000000000000000005 /* Sources */, 300000000000000000000004 /* Frameworks */);
+			buildRules = ();
+			dependencies = (0A0000000000000000000001 /* PBXTargetDependency */);
+			name = FluxBarTests;
+			productName = FluxBarTests;
+			productReference = 200000000000000000000011 /* FluxBarTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		700000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {500000000000000000000001 = {CreatedOnToolsVersion = 26.6;}; 500000000000000000000002 = {CreatedOnToolsVersion = 26.6; TestTargetID = 500000000000000000000001;};};
+			};
+			buildConfigurationList = 900000000000000000000001 /* Build configuration list for PBXProject "FluxBar" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base, de);
+			mainGroup = 400000000000000000000001;
+			productRefGroup = 400000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (500000000000000000000001 /* FluxBar */, 500000000000000000000002 /* FluxBarTests */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		300000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000000A /* AppIcon.icns in Resources */,
+				10000000000000000000000D /* FluxBarTemplate.svg in Resources */,
+				100000000000000000000016 /* Localizable.xcstrings in Resources */,
+				100000000000000000000017 /* AppShortcuts.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		600000000000000000000001 /* Build Go Core */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ();
+			name = "Build Go Core";
+			outputPaths = (
+				"$(GO_CORE_DIR)/libfluxcore.a",
+				"$(GO_CORE_DIR)/libfluxcore.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n\"${SRCROOT}/../Build/build-go-core.sh\" \"${GO_CORE_DIR}\" ${ARCHS}\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		300000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000001 /* FluxBarApp.swift in Sources */,
+				100000000000000000000002 /* AppDelegate.swift in Sources */,
+				100000000000000000000003 /* CoreModels.swift in Sources */,
+				100000000000000000000004 /* GoCore.swift in Sources */,
+				100000000000000000000005 /* Localization.swift in Sources */,
+				100000000000000000000006 /* CredentialStore.swift in Sources */,
+				100000000000000000000007 /* BrowserStore.swift in Sources */,
+				100000000000000000000008 /* ImageLoading.swift in Sources */,
+				100000000000000000000009 /* PopoverContentView.swift in Sources */,
+				10000000000000000000000E /* ScrolloverExposureTracker.swift in Sources */,
+				10000000000000000000000F /* ScrollActivityObserver.swift in Sources */,
+				100000000000000000000012 /* AppRouting.swift in Sources */,
+				100000000000000000000013 /* AppIntents.swift in Sources */,
+				100000000000000000000014 /* GlobalShortcut.swift in Sources */,
+				100000000000000000000015 /* KeyboardCommandObserver.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		300000000000000000000005 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000010 /* ScrolloverExposureTrackerTests.swift in Sources */, 100000000000000000000011 /* ScrolloverExposureTracker.swift in Sources */, 100000000000000000000018 /* RoutingTests.swift in Sources */, 100000000000000000000019 /* CoreModels.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0A0000000000000000000001 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = 500000000000000000000001 /* FluxBar */; targetProxy = 0B0000000000000000000001 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		200000000000000000000017 /* AppShortcuts.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				200000000000000000000018 /* en */,
+				200000000000000000000019 /* de */,
+			);
+			name = AppShortcuts.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		800000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0;}; name = Debug;};
+		800000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 5.0;}; name = Release;};
+		800000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
+				CODE_SIGNING_ALLOWED = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				GO_CORE_DIR = "$(DERIVED_FILE_DIR)/GoCore";
+				HEADER_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				INFOPLIST_FILE = FluxBar/Info.plist;
+				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 2.0.0;
+				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = ("$(inherited)", "$(GO_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBar;
+				PRODUCT_NAME = FluxBar;
+				SWIFT_OBJC_BRIDGING_HEADER = "FluxBar/FluxBar-Bridging-Header.h";
+			};
+			name = Debug;
+		};
+		800000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD)";
+				CODE_SIGNING_ALLOWED = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				GO_CORE_DIR = "$(DERIVED_FILE_DIR)/GoCore";
+				HEADER_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				INFOPLIST_FILE = FluxBar/Info.plist;
+				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MARKETING_VERSION = 2.0.0;
+				ONLY_ACTIVE_ARCH = NO;
+				OTHER_LDFLAGS = ("$(inherited)", "$(GO_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBar;
+				PRODUCT_NAME = FluxBar;
+				SWIFT_OBJC_BRIDGING_HEADER = "FluxBar/FluxBar-Bridging-Header.h";
+			};
+			name = Release;
+		};
+		800000000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBarTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxBar.app/Contents/MacOS/FluxBar";}; name = Debug;};
+		800000000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBarTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxBar.app/Contents/MacOS/FluxBar";}; name = Release;};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		900000000000000000000001 /* Build configuration list for PBXProject "FluxBar" */ = {isa = XCConfigurationList; buildConfigurations = (800000000000000000000001, 800000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		900000000000000000000002 /* Build configuration list for PBXNativeTarget "FluxBar" */ = {isa = XCConfigurationList; buildConfigurations = (800000000000000000000003, 800000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		900000000000000000000003 /* Build configuration list for PBXNativeTarget "FluxBarTests" */ = {isa = XCConfigurationList; buildConfigurations = (800000000000000000000005, 800000000000000000000006); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+/* End XCConfigurationList section */
+	};
+	rootObject = 700000000000000000000001 /* Project object */;
+}

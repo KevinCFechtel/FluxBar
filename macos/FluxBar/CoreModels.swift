@@ -9,9 +9,16 @@ struct CoreRequest: Encodable, Sendable {
     var locales: [String]? = nil
     var key: String? = nil
     var fallback: String? = nil
+    var oneFallback: String? = nil
+    var otherFallback: String? = nil
+    var count: Int? = nil
     var selection: ArticleSelection? = nil
     var entryID: Int64? = nil
+    var entryIDs: [Int64]? = nil
+    var retainEntryIDs: [Int64]? = nil
     var read: Bool? = nil
+    var mutationSource: String? = nil
+    var mutationID: String? = nil
     var currentStarred: Bool? = nil
     var desiredStarred: Bool? = nil
     var feedID: Int64? = nil
@@ -24,6 +31,12 @@ struct CoreResponse: Decodable, Sendable {
     let text: String?
     let snapshot: BrowseSnapshot?
     let icon: FeedIconPayload?
+    let receipt: MutationReceipt?
+}
+
+struct MutationReceipt: Decodable, Sendable {
+    let id: String
+    let count: Int
 }
 
 struct ArticleSelection: Codable, Hashable, Sendable {
@@ -49,6 +62,67 @@ struct ArticleSelection: Codable, Hashable, Sendable {
 
     func matchesRoute(_ other: ArticleSelection) -> Bool {
         kind == other.kind && id == other.id
+    }
+}
+
+enum NavigationRoute: Hashable, Sendable {
+    case all
+    case starred
+    case category(Int64)
+    case feed(Int64)
+    case article(id: Int64, url: String?)
+
+    var selection: ArticleSelection? {
+        switch self {
+        case .all: return .all
+        case .starred: return .starred
+        case .category(let id): return .category(id)
+        case .feed(let id): return .feed(id)
+        case .article: return nil
+        }
+    }
+
+    init?(searchableIdentifier: String) {
+        let parts = searchableIdentifier.split(separator: ":", maxSplits: 1)
+        guard parts.count == 2, let id = Int64(parts[1]) else { return nil }
+        switch parts[0] {
+        case "feed": self = .feed(id)
+        case "category": self = .category(id)
+        default: return nil
+        }
+    }
+}
+
+struct NavigationCatalog: Codable, Equatable, Sendable {
+    struct CategoryDestination: Codable, Equatable, Identifiable, Sendable {
+        let id: Int64
+        let title: String
+    }
+
+    struct FeedDestination: Codable, Equatable, Identifiable, Sendable {
+        let id: Int64
+        let title: String
+        let categoryID: Int64
+        let categoryTitle: String
+    }
+
+    let categories: [CategoryDestination]
+    let feeds: [FeedDestination]
+
+    static let empty = NavigationCatalog(categories: [], feeds: [])
+
+    init(snapshot: BrowseSnapshot) {
+        categories = snapshot.categories.map { .init(id: $0.id, title: $0.title) }
+        feeds = snapshot.categories.flatMap { category in
+            category.feeds.map {
+                .init(id: $0.id, title: $0.title, categoryID: category.id, categoryTitle: category.title)
+            }
+        }
+    }
+
+    init(categories: [CategoryDestination], feeds: [FeedDestination]) {
+        self.categories = categories
+        self.feeds = feeds
     }
 }
 

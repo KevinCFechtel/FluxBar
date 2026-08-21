@@ -5,6 +5,7 @@ go 1.25.1
 require (
 	fyne.io/systray v1.12.3-0.20260810170012-af4e8e793ec4
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade
+	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
 	github.com/sergeymakinen/go-ico v1.0.0
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c

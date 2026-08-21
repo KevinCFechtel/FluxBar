@@ -24,8 +24,8 @@ fi
 
 rm -rf -- "${APP_DIR}"
 xcodebuild \
-  -project "${REPOSITORY_DIR}/macos/FluxNews.xcodeproj" \
-  -scheme FluxNews \
+  -project "${REPOSITORY_DIR}/macos/FluxBar.xcodeproj" \
+  -scheme FluxBar \
   -configuration "${CONFIGURATION}" \
   -destination "platform=macOS" \
   -derivedDataPath "${DERIVED_DATA}" \
