@@ -97,6 +97,18 @@ final class ScrolloverExposureTrackerTests: XCTestCase {
         ).isEmpty)
     }
 
+    func testRepeatedSidebarLayoutRebasesResumeNormalScrollover() {
+        var tracker = qualifiedTracker()
+
+        tracker.rebase(frames: [1: CGRect(x: 200, y: -10, width: 600, height: 100)], unreadIDs: [1])
+        tracker.rebase(frames: [1: row(y: -10)], unreadIDs: [1])
+
+        XCTAssertEqual(tracker.processScroll(
+            frames: [1: row(y: -101)], viewport: viewport, unreadIDs: [1],
+            at: 1, offsetDelta: 50, userInitiated: true
+        ), [1])
+    }
+
     func testProgrammaticAndScrollbarChangesDoNotMark() {
         var tracker = qualifiedTracker()
         XCTAssertTrue(tracker.processScroll(

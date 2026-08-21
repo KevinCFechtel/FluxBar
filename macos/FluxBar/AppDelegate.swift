@@ -53,12 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         popover.contentViewController = NSHostingController(rootView: PopoverContentView(
             store: store,
             localization: localization,
-            layoutChanged: { [weak self] visible, completion in
-                guard let self else {
-                    completion()
-                    return
-                }
-                self.resizePopover(sidebarVisible: visible, animated: true, completion: completion)
+            layoutChanged: { [weak self] visible in
+                self?.resizePopover(sidebarVisible: visible, animated: true)
             },
             dismiss: { [weak self] in self?.dismissFluxBar() }
         ))
@@ -196,12 +192,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         panel.contentViewController = NSHostingController(rootView: PopoverContentView(
             store: store,
             localization: localization,
-            layoutChanged: { [weak self] visible, completion in
-                guard let self else {
-                    completion()
-                    return
-                }
-                self.resizePopover(sidebarVisible: visible, animated: true, completion: completion)
+            layoutChanged: { [weak self] visible in
+                self?.resizePopover(sidebarVisible: visible, animated: true)
             },
             dismiss: { [weak self] in self?.dismissFluxBar() }
         ))
@@ -210,15 +202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func resizePopover(
         sidebarVisible: Bool,
-        animated: Bool = false,
-        completion: @escaping () -> Void = {}
+        animated: Bool = false
     ) {
         self.sidebarVisible = sidebarVisible
         let size = popoverSize(sidebarVisible: sidebarVisible)
         guard animated else {
             popover.contentSize = size
             fallbackPanel?.setContentSize(size)
-            completion()
             return
         }
 
@@ -227,21 +217,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 context.duration = PopoverLayout.sidebarAnimationDuration
                 context.allowsImplicitAnimation = true
                 popover.contentSize = size
-            } completionHandler: {
-                completion()
             }
             fallbackPanel?.setContentSize(size)
             return
         }
 
         popover.contentSize = size
-        guard let panel = fallbackPanel else {
-            completion()
-            return
-        }
+        guard let panel = fallbackPanel else { return }
         guard panel.isVisible else {
             panel.setContentSize(size)
-            completion()
             return
         }
         let currentFrame = panel.frame
@@ -251,8 +235,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         NSAnimationContext.runAnimationGroup { context in
             context.duration = PopoverLayout.sidebarAnimationDuration
             panel.animator().setFrame(targetFrame, display: true)
-        } completionHandler: {
-            completion()
         }
     }
 

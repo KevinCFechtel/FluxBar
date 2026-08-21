@@ -16,7 +16,6 @@
 		100000000000000000000008 /* ImageLoading.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* ImageLoading.swift */; };
 		100000000000000000000009 /* PopoverContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* PopoverContentView.swift */; };
 		10000000000000000000000E /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* ScrolloverExposureTracker.swift */; };
-		10000000000000000000000F /* ScrollActivityObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* ScrollActivityObserver.swift */; };
 		100000000000000000000010 /* ScrolloverExposureTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* ScrolloverExposureTrackerTests.swift */; };
 		100000000000000000000011 /* ScrolloverExposureTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* ScrolloverExposureTracker.swift */; };
 		100000000000000000000012 /* AppRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* AppRouting.swift */; };
@@ -50,7 +49,6 @@
 		20000000000000000000000C /* FluxBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FluxBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		20000000000000000000000D /* FluxBarTemplate.svg */ = {isa = PBXFileReference; lastKnownFileType = image.svg; path = FluxBarTemplate.svg; sourceTree = "<group>"; };
 		20000000000000000000000E /* ScrolloverExposureTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTracker.swift; sourceTree = "<group>"; };
-		20000000000000000000000F /* ScrollActivityObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollActivityObserver.swift; sourceTree = "<group>"; };
 		200000000000000000000010 /* ScrolloverExposureTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrolloverExposureTrackerTests.swift; sourceTree = "<group>"; };
 		200000000000000000000011 /* FluxBarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FluxBarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000012 /* AppRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouting.swift; sourceTree = "<group>"; };
@@ -97,7 +95,6 @@
 				200000000000000000000008 /* ImageLoading.swift */,
 				200000000000000000000009 /* PopoverContentView.swift */,
 				20000000000000000000000E /* ScrolloverExposureTracker.swift */,
-				20000000000000000000000F /* ScrollActivityObserver.swift */,
 				200000000000000000000012 /* AppRouting.swift */,
 				200000000000000000000013 /* AppIntents.swift */,
 				200000000000000000000014 /* GlobalShortcut.swift */,
@@ -223,7 +220,6 @@
 				100000000000000000000008 /* ImageLoading.swift in Sources */,
 				100000000000000000000009 /* PopoverContentView.swift in Sources */,
 				10000000000000000000000E /* ScrolloverExposureTracker.swift in Sources */,
-				10000000000000000000000F /* ScrollActivityObserver.swift in Sources */,
 				100000000000000000000012 /* AppRouting.swift in Sources */,
 				100000000000000000000013 /* AppIntents.swift in Sources */,
 				100000000000000000000014 /* GlobalShortcut.swift in Sources */,
@@ -251,8 +247,8 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-		800000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0;}; name = Debug;};
-		800000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 5.0;}; name = Release;};
+		800000000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0;}; name = Debug;};
+		800000000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 5.0;}; name = Release;};
 		800000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -267,7 +263,7 @@
 				HEADER_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
 				INFOPLIST_FILE = FluxBar/Info.plist;
 				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.0.0;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = ("$(inherited)", "$(GO_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
@@ -290,7 +286,7 @@
 				HEADER_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
 				INFOPLIST_FILE = FluxBar/Info.plist;
 				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
-				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.0.0;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_LDFLAGS = ("$(inherited)", "$(GO_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
@@ -300,8 +296,8 @@
 			};
 			name = Release;
 		};
-		800000000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBarTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxBar.app/Contents/MacOS/FluxBar";}; name = Debug;};
-		800000000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 13.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBarTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxBar.app/Contents/MacOS/FluxBar";}; name = Release;};
+		800000000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBarTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxBar.app/Contents/MacOS/FluxBar";}; name = Debug;};
+		800000000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; MACOSX_DEPLOYMENT_TARGET = 15.0; ONLY_ACTIVE_ARCH = YES; PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBarTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FluxBar.app/Contents/MacOS/FluxBar";}; name = Release;};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
