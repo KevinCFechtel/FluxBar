@@ -19,7 +19,10 @@ import (
 	miniflux "miniflux.app/v2/client"
 )
 
-const iconWorkers = 6
+const (
+	iconWorkers    = 6
+	browsePageSize = 200
+)
 
 type SortOrder string
 
@@ -141,9 +144,9 @@ func (service *Service) Unread(ctx context.Context) ([]model.Entry, int, error) 
 func (service *Service) Browse(ctx context.Context, selection model.Selection) (model.BrowseSnapshot, error) {
 	selection = selection.Normalized()
 	filter := &miniflux.Filter{
-		Limit:     200,
-		Order:     "published_at",
-		Direction: service.direction(),
+		Limit:     browsePageSize,
+		Order:     "id",
+		Direction: "asc",
 		Statuses:  []string{miniflux.EntryStatusRead, miniflux.EntryStatusUnread},
 	}
 	if selection.UnreadOnly {
@@ -185,15 +188,12 @@ func (service *Service) Browse(ctx context.Context, selection model.Selection) (
 		starredTotal = starredResult.Total
 	}
 
-	result, err := service.client.EntriesContext(ctx, filter)
+	entries, total, err := service.fetchCompleteSelection(ctx, filter)
 	if err != nil {
 		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Einträge laden: %w", err)
 	}
-	if result == nil {
-		return model.BrowseSnapshot{}, fmt.Errorf("Miniflux-Einträge laden: leere Antwort")
-	}
 	if selection.Kind == model.SelectionStarred {
-		starredTotal = result.Total
+		starredTotal = total
 	}
 	categories, err := service.client.CategoriesContext(ctx)
 	if err != nil {
@@ -208,12 +208,59 @@ func (service *Service) Browse(ctx context.Context, selection model.Selection) (
 	return model.BrowseSnapshot{
 		Version:      1,
 		Selection:    selection,
-		Entries:      mapEntries(result.Entries),
+		Entries:      mapEntries(entries),
 		Categories:   navigation,
-		Total:        result.Total,
+		Total:        total,
 		UnreadTotal:  unreadTotal,
 		StarredTotal: starredTotal,
 	}, nil
+}
+
+func (service *Service) fetchCompleteSelection(ctx context.Context, base *miniflux.Filter) (miniflux.Entries, int, error) {
+	entries := make(miniflux.Entries, 0)
+	seen := make(map[int64]struct{})
+	expectedTotal := -1
+	var afterEntryID int64
+
+	for {
+		filter := *base
+		filter.AfterEntryID = afterEntryID
+		result, err := service.client.EntriesContext(ctx, &filter)
+		if err != nil {
+			return nil, 0, err
+		}
+		if result == nil {
+			return nil, 0, fmt.Errorf("leere Antwort")
+		}
+		if expectedTotal < 0 {
+			expectedTotal = result.Total
+			entries = make(miniflux.Entries, 0, expectedTotal)
+		}
+
+		lastID := afterEntryID
+		for _, entry := range result.Entries {
+			if entry == nil || entry.ID <= lastID {
+				return nil, 0, fmt.Errorf("unstabile Seitensortierung nach Artikel %d", lastID)
+			}
+			if _, exists := seen[entry.ID]; exists {
+				return nil, 0, fmt.Errorf("doppelter Artikel %d in paginierter Antwort", entry.ID)
+			}
+			seen[entry.ID] = struct{}{}
+			entries = append(entries, entry)
+			lastID = entry.ID
+		}
+
+		if len(entries) == expectedTotal {
+			return entries, expectedTotal, nil
+		}
+		if len(entries) > expectedTotal {
+			return nil, 0, fmt.Errorf("Trefferzahl änderte sich während der Pagination: erwartet %d, erhalten %d", expectedTotal, len(entries))
+		}
+		if len(result.Entries) < browsePageSize || lastID == afterEntryID {
+			return nil, 0, fmt.Errorf("unvollständige paginierte Antwort: erwartet %d, erhalten %d", expectedTotal, len(entries))
+		}
+		afterEntryID = lastID
+	}
 }
 
 func (service *Service) SetRead(ctx context.Context, entryID int64, read bool) error {

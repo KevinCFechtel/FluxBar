@@ -272,6 +272,23 @@ FROM entries WHERE ` + entryWhere + ` ORDER BY published_at ` + direction + ` LI
 }
 
 func reconcileCompleteSelection(ctx context.Context, tx *sql.Tx, accountID string, selection model.Selection, entries []model.Entry) error {
+	if _, err := tx.ExecContext(ctx, `CREATE TEMP TABLE IF NOT EXISTS fluxbar_remote_selection_ids(id INTEGER PRIMARY KEY)`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM fluxbar_remote_selection_ids`); err != nil {
+		return err
+	}
+	insert, err := tx.PrepareContext(ctx, `INSERT INTO fluxbar_remote_selection_ids(id) VALUES(?)`)
+	if err != nil {
+		return err
+	}
+	defer insert.Close()
+	for _, entry := range entries {
+		if _, err := insert.ExecContext(ctx, entry.ID); err != nil {
+			return err
+		}
+	}
+
 	parts := []string{"account_id=?"}
 	arguments := []any{accountID}
 	if selection.Kind == model.SelectionCategory {
@@ -282,14 +299,7 @@ func reconcileCompleteSelection(ctx context.Context, tx *sql.Tx, accountID strin
 		parts = append(parts, "feed_id=?")
 		arguments = append(arguments, selection.ID)
 	}
-	if len(entries) > 0 {
-		placeholders := make([]string, len(entries))
-		for index, entry := range entries {
-			placeholders[index] = "?"
-			arguments = append(arguments, entry.ID)
-		}
-		parts = append(parts, "id NOT IN ("+strings.Join(placeholders, ",")+")")
-	}
+	parts = append(parts, "NOT EXISTS (SELECT 1 FROM fluxbar_remote_selection_ids remote WHERE remote.id=entries.id)")
 	where := strings.Join(parts, " AND ")
 	if selection.UnreadOnly || selection.Kind == model.SelectionUnread {
 		_, err := tx.ExecContext(ctx, `UPDATE entries SET remote_status='read',status=CASE WHEN EXISTS(

@@ -166,6 +166,139 @@ func TestCompleteUnreadSnapshotReconcilesExternallyReadEntry(t *testing.T) {
 	}
 }
 
+func TestCompleteEmptyUnreadSnapshotReconcilesAllEntries(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	remote := testSnapshot()
+	remote.Entries = nil
+	remote.Total = 0
+	remote.UnreadTotal = 0
+	if err := store.ApplySnapshot(ctx, "account", remote); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.Snapshot(ctx, "account", remote.Selection, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Entries) != 0 || snapshot.Total != 0 {
+		t.Fatalf("empty reconciliation snapshot=%#v", snapshot)
+	}
+}
+
+func TestIncompleteUnreadSnapshotDoesNotReconcileMissingEntry(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	remote := testSnapshot()
+	remote.Entries = remote.Entries[1:]
+	remote.Total = 500
+	if err := store.ApplySnapshot(ctx, "account", remote); err != nil {
+		t.Fatal(err)
+	}
+
+	var unread int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entries WHERE account_id='account' AND status='unread'`).Scan(&unread); err != nil {
+		t.Fatal(err)
+	}
+	if unread != 2 {
+		t.Fatalf("incomplete snapshot reconciled missing entry: unread=%d", unread)
+	}
+}
+
+func TestCompleteFilteredSnapshotReconcilesOnlyItsScope(t *testing.T) {
+	for _, selection := range []model.Selection{
+		{Kind: model.SelectionCategory, ID: 10, UnreadOnly: true},
+		{Kind: model.SelectionFeed, ID: 20, UnreadOnly: true},
+	} {
+		t.Run(selection.Kind, func(t *testing.T) {
+			ctx := context.Background()
+			store := openTestStore(t)
+			initial := testSnapshot()
+			initial.Entries = append(initial.Entries, model.Entry{
+				ID: 3, Title: "Three", URL: "https://example.com/3", FeedID: 30, FeedName: "Other",
+				CategoryID: 11, PublishedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC), Status: "unread",
+			})
+			initial.Total = 3
+			if err := store.ApplySnapshot(ctx, "account", initial); err != nil {
+				t.Fatal(err)
+			}
+
+			remote := initial
+			remote.Selection = selection
+			remote.Entries = remote.Entries[:1]
+			remote.Total = 1
+			if err := store.ApplySnapshot(ctx, "account", remote); err != nil {
+				t.Fatal(err)
+			}
+
+			statuses := make(map[int64]string)
+			rows, err := store.db.QueryContext(ctx, `SELECT id,status FROM entries WHERE account_id='account'`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id int64
+				var status string
+				if err := rows.Scan(&id, &status); err != nil {
+					t.Fatal(err)
+				}
+				statuses[id] = status
+			}
+			if statuses[2] != "read" || statuses[3] != "unread" {
+				t.Fatalf("filtered reconciliation statuses=%#v", statuses)
+			}
+		})
+	}
+}
+
+func TestCompleteLargeSnapshotReconcilesWithoutSQLiteParameterLimit(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	initial := testSnapshot()
+	initial.Entries = make([]model.Entry, 1201)
+	for index := range initial.Entries {
+		id := int64(index + 1)
+		initial.Entries[index] = model.Entry{
+			ID: id, Title: "Entry", URL: "https://example.com", FeedID: 20, CategoryID: 10,
+			PublishedAt: time.Date(2026, 8, 20, 10, 0, index, 0, time.UTC), Status: "unread",
+		}
+	}
+	initial.Total = len(initial.Entries)
+	if err := store.ApplySnapshot(ctx, "account", initial); err != nil {
+		t.Fatal(err)
+	}
+
+	remote := initial
+	remote.Entries = remote.Entries[1 : len(remote.Entries)-1]
+	remote.Total = len(remote.Entries)
+	if err := store.ApplySnapshot(ctx, "account", remote); err != nil {
+		t.Fatal(err)
+	}
+
+	var unread int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entries WHERE account_id='account' AND status='unread'`).Scan(&unread); err != nil {
+		t.Fatal(err)
+	}
+	if unread != 1199 {
+		t.Fatalf("unread=%d", unread)
+	}
+	for _, id := range []int64{1, 1201} {
+		var status string
+		if err := store.db.QueryRowContext(ctx, `SELECT status FROM entries WHERE account_id='account' AND id=?`, id).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "read" {
+			t.Fatalf("entry %d status=%q", id, status)
+		}
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := OpenStore(filepath.Join(t.TempDir(), "inbox.sqlite3"))

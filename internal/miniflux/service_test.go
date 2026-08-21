@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -20,18 +22,21 @@ import (
 )
 
 type fakeClient struct {
-	entries    *miniflux.EntryResultSet
-	icons      map[int64]*miniflux.FeedIcon
-	categories miniflux.Categories
-	feeds      miniflux.Feeds
-	counters   *miniflux.FeedCounters
+	entries        *miniflux.EntryResultSet
+	pagedEntries   miniflux.Entries
+	pageErrorAfter map[int64]error
+	icons          map[int64]*miniflux.FeedIcon
+	categories     miniflux.Categories
+	feeds          miniflux.Feeds
+	counters       *miniflux.FeedCounters
 
-	mu          sync.Mutex
-	iconCalls   map[int64]int
-	updatedIDs  []int64
-	updatedWith string
-	lastFilter  *miniflux.Filter
-	starredID   int64
+	mu           sync.Mutex
+	iconCalls    map[int64]int
+	updatedIDs   []int64
+	updatedWith  string
+	lastFilter   *miniflux.Filter
+	entryFilters []miniflux.Filter
+	starredID    int64
 }
 
 func (client *fakeClient) CategoriesContext(context.Context) (miniflux.Categories, error) {
@@ -68,6 +73,21 @@ func (client *fakeClient) EntryContext(_ context.Context, entryID int64) (*minif
 func (client *fakeClient) EntriesContext(_ context.Context, filter *miniflux.Filter) (*miniflux.EntryResultSet, error) {
 	filterCopy := *filter
 	client.lastFilter = &filterCopy
+	client.entryFilters = append(client.entryFilters, filterCopy)
+	if filter.Order == "id" && client.pagedEntries != nil {
+		if err := client.pageErrorAfter[filter.AfterEntryID]; err != nil {
+			return nil, err
+		}
+		start := 0
+		for start < len(client.pagedEntries) && client.pagedEntries[start].ID <= filter.AfterEntryID {
+			start++
+		}
+		end := min(start+filter.Limit, len(client.pagedEntries))
+		return &miniflux.EntryResultSet{Total: len(client.pagedEntries), Entries: client.pagedEntries[start:end]}, nil
+	}
+	if client.entries == nil {
+		return &miniflux.EntryResultSet{}, nil
+	}
 	return client.entries, nil
 }
 
@@ -190,7 +210,7 @@ func TestBrowseMapsNavigationAndSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client.lastFilter.CategoryID != 4 || client.lastFilter.Limit != 200 {
+	if client.lastFilter.CategoryID != 4 || client.lastFilter.Limit != browsePageSize || client.lastFilter.Order != "id" {
 		t.Fatalf("filter = %#v", client.lastFilter)
 	}
 	if len(snapshot.Categories) != 1 || len(snapshot.Categories[0].Feeds) != 1 {
@@ -207,6 +227,86 @@ func TestBrowseMapsNavigationAndSelection(t *testing.T) {
 	}
 	if client.iconCalls[7] != 0 {
 		t.Fatal("Browse loaded feed icons synchronously")
+	}
+}
+
+func TestBrowsePaginatesCompleteSelection(t *testing.T) {
+	for _, count := range []int{0, 199, 200, 201, 401} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			entries := make(miniflux.Entries, count)
+			for index := range entries {
+				entries[index] = &miniflux.Entry{ID: int64(index + 1), Status: miniflux.EntryStatusUnread}
+			}
+			client := &fakeClient{pagedEntries: entries, iconCalls: make(map[int64]int)}
+			service := NewWithClient(client, nil)
+
+			snapshot, err := service.Browse(context.Background(), model.Selection{Kind: model.SelectionAll, UnreadOnly: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Total != count || len(snapshot.Entries) != count {
+				t.Fatalf("total=%d entries=%d", snapshot.Total, len(snapshot.Entries))
+			}
+			expectedPages := max(1, (count+browsePageSize-1)/browsePageSize)
+			if len(client.entryFilters) != expectedPages+1 { // Includes the global starred-count request.
+				t.Fatalf("requests=%d expected=%d", len(client.entryFilters), expectedPages+1)
+			}
+			var previous int64
+			for _, filter := range client.entryFilters[1:] {
+				if filter.Order != "id" || filter.Direction != "asc" || filter.AfterEntryID != previous {
+					t.Fatalf("page filter = %#v, previous=%d", filter, previous)
+				}
+				if filter.AfterEntryID == 0 {
+					previous = int64(min(count, browsePageSize))
+				} else {
+					previous = min(filter.AfterEntryID+browsePageSize, int64(count))
+				}
+			}
+		})
+	}
+}
+
+func TestBrowsePreservesSelectionFilterAcrossPages(t *testing.T) {
+	for _, selection := range []model.Selection{
+		{Kind: model.SelectionFeed, ID: 9, UnreadOnly: true},
+		{Kind: model.SelectionCategory, ID: 7, UnreadOnly: true},
+	} {
+		t.Run(selection.Kind, func(t *testing.T) {
+			entries := make(miniflux.Entries, 401)
+			for index := range entries {
+				entries[index] = &miniflux.Entry{ID: int64(index + 1), Status: miniflux.EntryStatusUnread}
+			}
+			client := &fakeClient{pagedEntries: entries, iconCalls: make(map[int64]int)}
+			service := NewWithClient(client, nil)
+
+			if _, err := service.Browse(context.Background(), selection); err != nil {
+				t.Fatal(err)
+			}
+			for _, filter := range client.entryFilters[1:] {
+				if filter.Status != miniflux.EntryStatusUnread ||
+					(selection.Kind == model.SelectionFeed && filter.FeedID != selection.ID) ||
+					(selection.Kind == model.SelectionCategory && filter.CategoryID != selection.ID) {
+					t.Fatalf("filtered page = %#v", filter)
+				}
+			}
+		})
+	}
+}
+
+func TestBrowseRejectsIncompletePagination(t *testing.T) {
+	entries := make(miniflux.Entries, 401)
+	for index := range entries {
+		entries[index] = &miniflux.Entry{ID: int64(index + 1), Status: miniflux.EntryStatusUnread}
+	}
+	client := &fakeClient{
+		pagedEntries:   entries,
+		pageErrorAfter: map[int64]error{200: errors.New("page failed")},
+		iconCalls:      make(map[int64]int),
+	}
+	service := NewWithClient(client, nil)
+
+	if _, err := service.Browse(context.Background(), model.Selection{Kind: model.SelectionAll, UnreadOnly: true}); err == nil {
+		t.Fatal("incomplete pagination returned no error")
 	}
 }
 

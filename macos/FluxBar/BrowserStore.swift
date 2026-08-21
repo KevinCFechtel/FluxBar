@@ -7,6 +7,12 @@ struct AutomaticReadUndo: Equatable {
     let count: Int
 }
 
+struct ManualRefreshScrollRequest: Equatable {
+    let id: UInt64
+    let presentationRevision: UInt64
+    let firstEntryID: Int64?
+}
+
 enum ArticleListStyle: String {
     case row
     case card
@@ -14,6 +20,11 @@ enum ArticleListStyle: String {
 
 @MainActor
 final class BrowserStore: ObservableObject {
+    private enum RefreshOrigin {
+        case manual
+        case automatic
+    }
+
     private static let automaticReadUndoMinimumCount = 3
     private static let articleListStyleKey = "FluxBar.articleListStyle"
 
@@ -21,6 +32,7 @@ final class BrowserStore: ObservableObject {
     @Published private(set) var selection = ArticleSelection.all
     @Published private(set) var isLoading = false
     @Published private(set) var listPresentationRevision: UInt64 = 0
+    @Published private(set) var manualRefreshScrollRequest: ManualRefreshScrollRequest?
     @Published private(set) var automaticReadUndo: AutomaticReadUndo?
     @Published private(set) var markReadOnScrolloverEnabled: Bool
     @Published private(set) var articleListStyle: ArticleListStyle
@@ -35,6 +47,8 @@ final class BrowserStore: ObservableObject {
     private var configurationGeneration = 0
     private var routeGeneration = 0
     private var mutationGeneration = 0
+    private var refreshGeneration = 0
+    private var manualRefreshScrollRequestID: UInt64 = 0
     private var retainedEntryIDs: Set<Int64> = []
     private var lastRefresh: Date?
     private var undoExpirationTask: Task<Void, Never>?
@@ -102,7 +116,7 @@ final class BrowserStore: ObservableObject {
         }
         mutationGeneration += 1
         retainedEntryIDs.removeAll()
-        refresh(selection: selection, route: routeGeneration, retainEntryIDs: [])
+        refresh(selection: selection, route: routeGeneration, retainEntryIDs: [], origin: .manual)
     }
 
     func refreshIfStale() {
@@ -427,11 +441,18 @@ final class BrowserStore: ObservableObject {
                 isNavigating = false
             }
             guard !isPopoverVisible else { return }
-            refresh(selection: selected, route: route, retainEntryIDs: Array(retainedEntryIDs))
+            refresh(selection: selected, route: route, retainEntryIDs: Array(retainedEntryIDs), origin: .automatic)
         }
     }
 
-    private func refresh(selection: ArticleSelection, route: Int, retainEntryIDs: [Int64]) {
+    private func refresh(
+        selection: ArticleSelection,
+        route: Int,
+        retainEntryIDs: [Int64],
+        origin: RefreshOrigin
+    ) {
+        refreshGeneration += 1
+        let refresh = refreshGeneration
         isLoading = true
         Task {
             do {
@@ -440,11 +461,21 @@ final class BrowserStore: ObservableObject {
                     selection: selection,
                     retainEntryIDs: retainEntryIDs
                 ))
-                guard route == routeGeneration else { return }
+                guard route == routeGeneration, refresh == refreshGeneration else { return }
                 apply(response, structural: true)
-                lastRefresh = Date()
+                if response.error == nil {
+                    lastRefresh = Date()
+                    if origin == .manual, isPopoverVisible {
+                        manualRefreshScrollRequestID &+= 1
+                        manualRefreshScrollRequest = ManualRefreshScrollRequest(
+                            id: manualRefreshScrollRequestID,
+                            presentationRevision: listPresentationRevision,
+                            firstEntryID: snapshot.entries.first?.id
+                        )
+                    }
+                }
             } catch {
-                guard route == routeGeneration else { return }
+                guard route == routeGeneration, refresh == refreshGeneration else { return }
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -515,7 +546,8 @@ final class BrowserStore: ObservableObject {
         refresh(
             selection: selection,
             route: routeGeneration,
-            retainEntryIDs: Array(retainedEntryIDs)
+            retainEntryIDs: Array(retainedEntryIDs),
+            origin: .automatic
         )
     }
 

@@ -318,6 +318,10 @@ private struct ArticlePane: View {
                         }
                         observeExposure(at: Date.timeIntervalSinceReferenceDate)
                     }
+                    .onChange(of: store.manualRefreshScrollRequest) { _, request in
+                        guard let request else { return }
+                        scrollToTop(after: request, proxy: proxy)
+                    }
                 }
             }
         }
@@ -381,6 +385,38 @@ private struct ArticlePane: View {
         )
         if !marked.isEmpty {
             store.markReadAutomatically(marked)
+        }
+    }
+
+    private func scrollToTop(after request: ManualRefreshScrollRequest, proxy: ScrollViewProxy) {
+        guard store.isPopoverVisible,
+              request.presentationRevision == store.listPresentationRevision,
+              let firstEntryID = request.firstEntryID,
+              store.snapshot.entries.first?.id == firstEntryID else { return }
+
+        exposureTracker.reset()
+        trackerPresentationRevision = store.listPresentationRevision
+        selectedArticleID = nil
+        suppressScrolloverUntil = .infinity
+
+        DispatchQueue.main.async {
+            defer {
+                suppressScrolloverUntil = ProcessInfo.processInfo.systemUptime + 0.4
+            }
+            guard store.isPopoverVisible,
+                  request == store.manualRefreshScrollRequest,
+                  request.presentationRevision == store.listPresentationRevision,
+                  store.snapshot.entries.first?.id == firstEntryID else {
+                exposureTracker.reset()
+                return
+            }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(firstEntryID, anchor: .top)
+            }
+            exposureTracker.reset()
+            exposureTracker.rebase(frames: articleFrames, unreadIDs: unreadArticleIDs)
         }
     }
 
