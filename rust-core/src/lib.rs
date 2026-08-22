@@ -7,7 +7,7 @@
 //! extern void FluxCoreFree(char* value);
 //! ```
 //!
-//! Phase 3 architecture:
+//! Compatibility architecture:
 //!
 //! ```text
 //! C ABI (ffi)
@@ -22,15 +22,12 @@
 //! dispatcher
 //!   │
 //!   ▼
-//! operation-specific handler
-//!   │
-//!   ▼
-//! not implemented
+//! operation-specific runtime/service handler
 //! ```
 //!
-//! SQLite, Miniflux, snapshots, icons, localization, mutations, and sync are
-//! intentionally not implemented yet. All `unsafe` code is confined to the
-//! `ffi` module.
+//! All current public operations are implemented. Go remains the behavioral
+//! reference while Phase 10 orchestration/deadline risks are remediated. All
+//! `unsafe` code is confined to the `ffi` module.
 
 pub mod article;
 mod dispatcher;

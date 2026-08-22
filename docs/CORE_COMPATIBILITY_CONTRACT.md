@@ -130,7 +130,8 @@ go-core/internal/coreapi/api.go defines Response with these JSON fields:
 -   error (string, omitted when empty)
 -   text (string, omitted when empty)
 -   snapshot (object)
--   icon (object with regular and dark byte arrays)
+-   icon (object with regular and dark byte arrays encoded as base64 JSON
+    strings, following Go's `[]byte` encoding; empty variants are omitted)
 -   receipt (object with id and count)
 
 ### configure
@@ -149,8 +150,9 @@ Validation:
 -   server is trimmed, trailing slashes are removed, and the result must
     parse as http or https with a non-empty host.
 -   apiKey is trimmed and must be non-empty after trimming.
--   configurationGeneration below the previously stored generation causes
-    the configuration to be ignored (stale-configuration race protection).
+-   configurationGeneration below the active generation prevents replacement
+    of the active service. Validation, store opening, and account upsert happen
+    before that check and remain observable.
 -   Validation error messages are localized using the supplied locales.
 
 **Success response**
@@ -171,8 +173,10 @@ ok set to false and error contains a localized validation message.
 -   Creates an inbox.Service with a Miniflux remote client if the
     generation is current.
 
-**SQLite effects:** INSERT OR REPLACE into accounts(id, server) using the
-account ID derived as SHA256(server + NUL byte + apiKey), hex-encoded.
+**SQLite effects:** INSERT into accounts(id, server) with
+`ON CONFLICT(id) DO UPDATE SET server=excluded.server`, preserving existing
+counters/timestamps. The account ID is SHA256(server + NUL byte + apiKey),
+hex-encoded.
 
 **Remote effects:** none during configure.
 
@@ -462,12 +466,13 @@ flush or its remote calls.
 
 **Success response**
 
-ok true and icon present with regular and dark byte arrays. Either array
-may be empty when no usable icon exists.
+ok true and icon present. The optional regular and dark fields are base64 JSON
+strings and are omitted when the corresponding variant is empty.
 
 **Failure response**
 
-ok false with "Miniflux is not configured" or a remote/cache error.
+ok false with "Miniflux is not configured". Once configured, remote, missing,
+and processing failures are collapsed into a successful empty icon payload.
 
 **Timeout/deadline:** 15 seconds.
 
@@ -480,8 +485,8 @@ concurrent loads for the same feed ID.
 to a square PNG. A dark-mode variant is generated when the icon is dark
 and transparent.
 
-**Partial-success behavior:** a missing or unprocessable icon returns
-empty byte arrays rather than an error.
+**Partial-success behavior:** a missing or unprocessable icon returns an empty
+icon object rather than an error.
 
 **Reference implementation/tests:**
 
@@ -983,7 +988,7 @@ byte sequence and silently interprets non-UTF-8 bytes according to Go's
 UTF-8 handling. Exact byte-for-byte equivalence for malformed foreign
 input is neither possible to guarantee nor meaningful to the product.
 
-The Rust skeleton defines deterministic safe behavior:
+The Rust compatibility candidate defines deterministic safe behavior:
 
 -   `null` request -> `{"ok":false,"error":"null request"}`.
 -   Non-UTF-8 request -> `{"ok":false,"error":"invalid request: ..."}`.
@@ -993,17 +998,14 @@ This matches the observable error shape of the Go core for the cases
 that matter to the Swift caller. Rust must not read past a NUL byte,
 must not retain the input pointer, and must not panic.
 
-## Unresolved compatibility questions
+## Resolved compatibility questions
 
--   What should Rust return when the input C string is not valid UTF-8?
-    Go silently uses C.GoString behavior. A deterministic Rust choice
-    should be documented and tested.
--   How should Rust handle configure when the same account ID already
-    exists with a different server? The Go code updates the server column
-    via ON CONFLICT DO UPDATE.
--   What is the exact behavior when selection.kind is missing or empty in
-    a request? The Go dispatcher does not validate selection before passing
-    it to Normalized(), which falls back to all/unreadOnly true.
+-   Invalid non-UTF-8 input returns a deterministic invalid-request response in
+    Rust; exact parser text is an accepted implementation-specific difference.
+-   Configure for an existing account ID updates only the server column via
+    `ON CONFLICT DO UPDATE`, preserving counters and timestamps.
+-   Missing or empty `selection.kind` falls back to all/unreadOnly true through
+    normal selection normalization.
 
 ## Contract change rule
 
@@ -1016,3 +1018,39 @@ During the compatibility migration:
 
 Any deliberate product/contract change is a separate task requiring an
 explicit decision.
+
+## Phase 10 parity findings
+
+Phase 10 re-audited the Go implementation rather than treating earlier phase
+documents as proof. Differential coverage now verifies transport null/default
+semantics, icon base64 wire encoding and decoded processing output,
+bidirectional mutation and Undo continuation, colliding numeric feed/entry IDs
+across accounts, 26 sync/failure sequences, snapshot boundaries at 0, 1, 199,
+200, 201, and 205 rows, malformed HTML/template traversal, ordered locale
+fallback, and negative and 64-bit plural counts. Rust unit tests and Go source
+characterization cover icon retry behavior. Universal core builds were also
+validated separately from the differential suites.
+
+Compatibility defects fixed in Rust during this audit include:
+
+- explicit JSON `null` fields now use Go zero values;
+- icon bytes serialize as base64 strings and failed icons are not cached;
+- icon single-flight cleanup wakes waiters even during panic unwinding;
+- terminal Miniflux `/v1` endpoints and redirect limits match the Go client;
+- malformed configure authorities rejected by Go are rejected by Rust;
+- `<template>` image traversal and negative plural forms match Go;
+- localization counts accept the 64-bit range used by Go on supported macOS.
+
+The audit result is **NOT READY** for a development-default transition. The
+remaining material difference is orchestration: Go serializes refresh/flush but
+allows local snapshots and mutations during remote work, while Rust currently
+holds one service mutex across remote, SQLite, and icon operations. Go contexts
+bound subsequent HTTP/SQLite calls but do not cancel a wait on Go's `syncMu`;
+Rust similarly lacks cancellation while waiting for its broader service mutex.
+Until Rust's broader blocking scope is remediated and tested, the 5-second local
+operation behavior and local-first responsiveness are not proven equivalent.
+
+Accepted bounded differences remain parser-specific malformed-JSON detail,
+Rust's safer FFI panic containment, and simplified locale matching for the
+actual English/German Apple locale lists. Arbitrary Accept-Language syntax and
+every malformed URL form are not claimed equivalent.

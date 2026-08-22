@@ -166,6 +166,66 @@
       "enclosures": [
         { "url": "/images/attachment.jpg", "mime_type": "image/jpeg" }
       ]
+    },
+    {
+      "name": "ignored_head_noscript_template_text",
+      "content": "<head><title>Hidden title</title></head><body><noscript>Hidden fallback</noscript><template><p>Hidden template</p></template><p>Visible article</p></body>",
+      "base_url": "https://example.com/article/",
+      "limit": 600
+    },
+    {
+      "name": "template_image_before_visible_image",
+      "content": "<template><img src=\"/template-placeholder.jpg\"></template><p>Article</p><img src=\"/article.jpg\">",
+      "base_url": "https://example.com/posts/1",
+      "limit": 600
+    },
+    {
+      "name": "noscript_image_before_visible_image",
+      "content": "<noscript><img src=\"/noscript-fallback.jpg\"></noscript><p>Article</p><img src=\"/article.jpg\">",
+      "base_url": "https://example.com/posts/1",
+      "limit": 600
+    },
+    {
+      "name": "malformed_formatting_adoption",
+      "content": "<p>Alpha <b>bold <i>both</b> italic</i> end</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "malformed_table_foster_parenting",
+      "content": "<div>Before<table>loose text<tr><td>Cell one<td><p>Cell two</table>After</div>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "image_attribute_priority_and_duplicates",
+      "content": "<img DATA-SRC=\"data:image/gif;base64,abc\" data-original=\" /preferred.jpg \" src=\"/fallback.jpg\" src=\"/duplicate.jpg\">",
+      "base_url": "https://example.com/articles/1",
+      "limit": 600
+    },
+    {
+      "name": "image_dimension_boundaries",
+      "content": "<img width=\"2px\" height=\" 2px \" src=\"/two-pixel-tracker.gif\"><img width=\"2\" src=\"/one-dimension.jpg\"><img width=\"3\" height=\"2\" src=\"/article.jpg\">",
+      "base_url": "https://example.com/posts/1",
+      "limit": 600
+    },
+    {
+      "name": "source_data_srcset_last_candidate",
+      "content": "<picture><source DATA-SRCSET=\" /small.jpg 1x, /large.jpg 2x \" srcset=\"/ignored.jpg 3x\"><img src=\"/fallback.jpg\" alt=\"Fallback\"></picture>",
+      "base_url": "https://example.com/articles/1",
+      "limit": 600
+    },
+    {
+      "name": "truncation_exact_600_runes",
+      "content": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghiä",
+      "base_url": "",
+      "limit": 600
+    },
+    {
+      "name": "truncation_601_runes_unicode_boundary",
+      "content": "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghäZQ",
+      "base_url": "",
+      "limit": 600
     }
   ]
 }

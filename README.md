@@ -44,7 +44,7 @@ An experimental Rust core build is available for development and compatibility t
 FLUX_CORE=rust ./Build/build.sh
 ```
 
-The Rust core is intentionally still a skeleton in this migration phase; it will launch and link, but it does not implement Miniflux sync, SQLite, snapshots, or other business functionality yet.
+The Rust core implements the current public operation surface but remains experimental. Phase 10 found unresolved service-lock/deadline parity risks, so Go remains the default and production/reference implementation.
 
 Both build paths produce `dist/FluxBar.app`. On first launch, enter the Miniflux URL and API key through “Settings…” in the menu. Credentials do not need to be stored in the source code or any build files.
 

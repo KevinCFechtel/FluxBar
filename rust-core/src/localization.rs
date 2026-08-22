@@ -55,14 +55,15 @@ impl Localizer {
         key: &str,
         one_fallback: &str,
         other_fallback: &str,
-        count: i32,
+        count: i64,
     ) -> String {
-        let fallback = if count == 1 {
+        let singular = count.unsigned_abs() == 1;
+        let fallback = if singular {
             one_fallback
         } else {
             other_fallback
         };
-        let form = if count == 1 { "one" } else { "other" };
+        let form = if singular { "one" } else { "other" };
         let template = self
             .messages
             .get(key)
@@ -85,7 +86,7 @@ fn resolve_supported_language(preferred: &[String]) -> &'static str {
     "en"
 }
 
-fn apply_count_template(template: &str, count: i32) -> String {
+fn apply_count_template(template: &str, count: i64) -> String {
     let count_str = count.to_string();
     let mut result = String::with_capacity(template.len());
     let mut rest = template;

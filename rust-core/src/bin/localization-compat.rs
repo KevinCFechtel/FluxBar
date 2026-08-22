@@ -24,7 +24,7 @@ struct CaseInput {
     #[serde(default, rename = "other_fallback")]
     other_fallback: String,
     #[serde(default)]
-    count: i32,
+    count: i64,
 }
 
 #[derive(Debug, serde::Serialize)]

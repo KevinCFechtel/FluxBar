@@ -6,8 +6,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
-PORT=18478
-BASE="http://127.0.0.1:${PORT}"
+PORT=""
+BASE=""
 SERVER_PID=""
 
 cleanup() {
@@ -18,11 +18,22 @@ trap cleanup EXIT
 
 launch_server() {
   local mode="$1" log="$2"
+  local port_file="${WORK_DIR}/server.port"
   : > "${log}"
-  python3 "${SCRIPT_DIR}/testdata/fake_sync_miniflux.py" "${PORT}" "${mode}" "${log}" &
+  rm -f "${port_file}"
+  python3 "${SCRIPT_DIR}/testdata/fake_sync_miniflux.py" 0 "${mode}" "${log}" "${port_file}" &
   SERVER_PID=$!
   for _ in $(seq 1 50); do
-    if nc -z 127.0.0.1 "${PORT}" 2>/dev/null; then return; fi
+    if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+      wait "${SERVER_PID}" || true
+      echo "fake sync server exited during startup" >&2
+      exit 1
+    fi
+    if [[ -s "${port_file}" ]]; then
+      PORT="$(<"${port_file}")"
+      BASE="http://127.0.0.1:${PORT}"
+      if nc -z 127.0.0.1 "${PORT}" 2>/dev/null; then return; fi
+    fi
     sleep 0.1
   done
   echo "fake sync server failed to start" >&2
@@ -83,6 +94,11 @@ def load(prefix, suffix):
 go_response, rust_response = load("go", "json"), load("rust", "json")
 go_response.pop("error", None) if not go_response.get("error") else None
 rust_response.pop("error", None) if not rust_response.get("error") else None
+if scenario == "pagination-malformed":
+    prefix = "Miniflux-Einträge laden:"
+    if not all(response.get("error", "").startswith(prefix) for response in (go_response, rust_response)):
+        raise SystemExit(f"malformed pagination error mismatch\ngo={go_response.get('error')}\nrust={rust_response.get('error')}")
+    go_response["error"] = rust_response["error"] = prefix
 for response in (go_response, rust_response):
     for entry in response.get("snapshot", {}).get("entries", []):
         entry.pop("icon", None); entry.pop("darkIcon", None)
@@ -102,17 +118,28 @@ PYEOF
 compare_case initial happy
 compare_case incremental incremental
 compare_case incomplete incomplete
+compare_case pagination-duplicate pagination-duplicate
+compare_case pagination-reordered pagination-reordered
+compare_case pagination-growing-total pagination-growing-total
+compare_case pagination-shrinking-total pagination-shrinking-total
+compare_case pagination-malformed pagination-malformed
 compare_case refresh-5xx refresh-5xx
 compare_case refresh-auth refresh-auth
 compare_case read happy
 compare_case read-reversal happy
+compare_case read-cycle happy
+compare_case read-identical happy
 compare_case star happy
 compare_case star-reversal happy
+compare_case star-cycle happy
+compare_case star-identical happy
 compare_case pending-stale fail-first
+compare_case restart-pending happy
 compare_case undo-before-flush happy
 compare_case undo-after-flush happy
 compare_case discard-undo happy
 compare_case full-failure fail-first
 compare_case partial-failure fail-second
+compare_case mixed-middle-retry fail-second
 
 echo "Sync state-machine differential tests passed."

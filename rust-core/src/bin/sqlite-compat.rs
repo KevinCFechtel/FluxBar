@@ -9,6 +9,7 @@ use fluxcore::domain::navigation::{Category, Feed};
 use fluxcore::persistence::{PersistedEntry, Store};
 
 const SERVER: &str = "https://compat.example";
+const OTHER_SERVER: &str = "https://compat-other.example";
 const API_KEY: &str = "compat-key";
 /// Must match fixtureAccount constants in go-core/cmd/sqlite-compat.
 const FIXTURE_SERVER: &str = "https://fixture.example";
@@ -35,12 +36,13 @@ fn main() {
         "create-mutations" => create_mutations(&path),
         "continue-go-mutations" => continue_mutations(&path, "Go"),
         "snapshot" => {
-            // snapshot <db> <kind> <id> <unreadOnly> <retainCSV>
+            // snapshot <db> <kind> <id> <unreadOnly> <retainCSV> <newestFirst>
             let kind = arguments.next().expect("selection kind required");
             let id: i64 = arguments.next().expect("id required").parse().expect("id");
             let unread_only = arguments.next().expect("unreadOnly required") == "true";
             let retain_csv = arguments.next().expect("retainCSV required");
-            snapshot(&path, &kind, id, unread_only, &retain_csv);
+            let newest_first = arguments.next().expect("newestFirst required") == "true";
+            snapshot(&path, &kind, id, unread_only, &retain_csv, newest_first);
         }
         "sync-probe" => {
             let base = arguments.next().expect("baseURL required");
@@ -54,78 +56,262 @@ fn main() {
 fn create_mutations(path: &Path) {
     let store = Store::open(path).expect("open Rust mutation store");
     let account = account_id(SERVER, API_KEY);
-    store.ensure_account(&account, SERVER).unwrap();
-    store
-        .apply_snapshot(&account, &mutation_snapshot())
-        .unwrap();
+    let other = account_id(OTHER_SERVER, API_KEY);
+    for (id, server, label) in [(&account, SERVER, "A"), (&other, OTHER_SERVER, "B")] {
+        store.ensure_account(id, server).unwrap();
+        store.apply_snapshot(id, &mutation_snapshot(label)).unwrap();
+    }
     store.set_read(&account, &[1], true, true).unwrap();
-    store.set_starred(&account, 2, true).unwrap();
+    store.set_read(&account, &[2], true, true).unwrap();
+    store.set_starred(&account, 3, true).unwrap();
+    store.set_read(&other, &[1], true, true).unwrap();
 }
 
 fn continue_mutations(path: &Path, producer: &str) {
     let account = account_id(SERVER, API_KEY);
-    let batch_id: String = rusqlite::Connection::open(path)
+    let other = account_id(OTHER_SERVER, API_KEY);
+    let store = Store::open(path).expect("open mutation store");
+    assert_mutation_snapshot(
+        &store,
+        &account,
+        &[
+            "A One:read:false",
+            "A Two:read:false",
+            "A Three:unread:true",
+        ],
+    );
+    assert_mutation_snapshot(
+        &store,
+        &other,
+        &[
+            "B One:read:false",
+            "B Two:unread:false",
+            "B Three:unread:false",
+        ],
+    );
+    assert_mutation_snapshot(
+        &store,
+        &account,
+        &[
+            "A One:read:false",
+            "A Two:read:false",
+            "A Three:unread:true",
+        ],
+    );
+    let pending = store.pending(&account).unwrap();
+    assert_eq!(pending.len(), 3, "{producer} pending state");
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT entry_id,batch_id FROM undo_items WHERE account_id=?1 ORDER BY entry_id")
+        .unwrap();
+    let batch_ids: std::collections::HashMap<i64, String> = statement
+        .query_map([&account], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    drop(statement);
+    drop(connection);
+    assert_eq!(batch_ids.len(), 2, "{producer} undo batches");
+    for mutation in &pending {
+        store.acknowledge(&account, mutation).unwrap();
+    }
+    store.undo(&account, &batch_ids[&1]).unwrap();
+    store.discard_undo(&account, &batch_ids[&2]).unwrap();
+    let continued = store.pending(&account).unwrap();
+    assert!(
+        continued.len() == 1
+            && continued[0].entry_id == 1
+            && continued[0].field == "read"
+            && !continued[0].desired,
+        "{producer} continuation: {continued:?}"
+    );
+    let other_pending = store.pending(&other).unwrap();
+    assert!(
+        other_pending.len() == 1 && other_pending[0].entry_id == 1 && other_pending[0].desired,
+        "{producer} other pending: {other_pending:?}"
+    );
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let account_undo: i64 = connection
         .query_row(
-            "SELECT id FROM undo_batches WHERE account_id=?1",
+            "SELECT COUNT(*) FROM undo_batches WHERE account_id=?1",
             [&account],
             |row| row.get(0),
         )
         .unwrap();
-    let store = Store::open(path).expect("open mutation store");
-    let pending = store.pending(&account).unwrap();
-    assert_eq!(pending.len(), 2, "{producer} pending state");
-    store.undo(&account, &batch_id).unwrap();
+    let other_undo: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM undo_batches WHERE account_id=?1",
+            [&other],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(
-        store.pending(&account).unwrap().len(),
-        2,
-        "{producer} continuation"
+        (account_undo, other_undo),
+        (0, 1),
+        "{producer} undo isolation"
+    );
+    assert_mutation_snapshot(
+        &store,
+        &account,
+        &[
+            "A One:unread:false",
+            "A Two:read:false",
+            "A Three:unread:true",
+        ],
+    );
+    assert_mutation_snapshot(
+        &store,
+        &other,
+        &[
+            "B One:read:false",
+            "B Two:unread:false",
+            "B Three:unread:false",
+        ],
     );
 }
 
-fn mutation_snapshot() -> fluxcore::persistence::SnapshotData {
+fn assert_mutation_snapshot(store: &Store, account: &str, expected: &[&str]) {
+    use fluxcore::domain::selection::Selection;
+    let snapshot = store
+        .local_snapshot(
+            account,
+            &Selection::All {
+                id: 0,
+                unread_only: false,
+            },
+            false,
+            &[],
+        )
+        .unwrap();
+    let actual: Vec<String> = snapshot
+        .entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}:{}:{}",
+                entry.title,
+                entry.status.as_str(),
+                entry.starred
+            )
+        })
+        .collect();
+    assert_eq!(actual, expected, "account snapshot");
+}
+
+fn mutation_snapshot(label: &str) -> fluxcore::persistence::SnapshotData {
     use fluxcore::domain::selection::Selection;
     fluxcore::persistence::SnapshotData {
         version: 1,
         selection: Selection::All {
             id: 0,
-            unread_only: true,
+            unread_only: false,
         },
         entries: vec![
-            mutation_entry(1, "2026-08-22T10:00:01Z"),
-            mutation_entry(2, "2026-08-22T10:00:02Z"),
+            mutation_entry(label, 1, "2026-08-22T10:00:01Z"),
+            mutation_entry(label, 2, "2026-08-22T10:00:02Z"),
+            mutation_entry(label, 3, "2026-08-22T10:00:03Z"),
         ],
         categories: vec![Category {
             id: 10,
-            title: "Category".to_string(),
-            unread_count: 2,
+            title: format!("{label} Category"),
+            unread_count: 3,
             feeds: vec![Feed {
                 id: 20,
-                title: "Feed".to_string(),
+                title: format!("{label} Feed"),
                 category_id: 10,
-                unread_count: 2,
+                unread_count: 3,
             }],
         }],
-        total: 2,
-        unread_total: 2,
+        total: 3,
+        unread_total: 3,
         starred_total: 0,
     }
 }
 
-fn mutation_entry(id: i64, published: &str) -> Entry {
+fn mutation_entry(label: &str, id: i64, published: &str) -> Entry {
     Entry {
         id,
-        title: if id == 1 { "One" } else { "Two" }.to_string(),
+        title: format!(
+            "{label} {}",
+            match id {
+                1 => "One",
+                2 => "Two",
+                _ => "Three",
+            }
+        ),
         url: format!("https://example.com/{id}"),
         comments_url: String::new(),
         feed_id: 20,
-        feed_name: "Feed".to_string(),
+        feed_name: format!("{label} Feed"),
         category_id: 10,
         published_at_rfc3339: published.to_string(),
         preview: String::new(),
         image_url: String::new(),
         status: EntryStatus::Unread,
         starred: false,
+    }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncProbeEntry {
+    id: i64,
+    status: String,
+    starred: bool,
+}
+
+#[derive(serde::Serialize)]
+struct SyncProbePending {
+    #[serde(rename = "entryID")]
+    entry_id: i64,
+    field: String,
+    desired: bool,
+    revision: i64,
+}
+
+#[derive(serde::Serialize)]
+struct SyncProbeState {
+    label: String,
+    entries: Vec<SyncProbeEntry>,
+    pending: Vec<SyncProbePending>,
+}
+
+fn capture_sync_state(path: &Path, account: &str, label: &str) -> SyncProbeState {
+    use fluxcore::domain::selection::Selection;
+
+    let store = Store::open(path).expect("open trace store");
+    let snapshot = store
+        .local_snapshot(
+            account,
+            &Selection::All {
+                id: 0,
+                unread_only: false,
+            },
+            false,
+            &[],
+        )
+        .expect("trace snapshot");
+    let pending = store.pending(account).expect("trace pending");
+    SyncProbeState {
+        label: label.to_string(),
+        entries: snapshot
+            .entries
+            .into_iter()
+            .map(|entry| SyncProbeEntry {
+                id: entry.id,
+                status: entry.status.as_str().to_string(),
+                starred: entry.starred,
+            })
+            .collect(),
+        pending: pending
+            .into_iter()
+            .map(|mutation| SyncProbePending {
+                entry_id: mutation.entry_id,
+                field: mutation.field,
+                desired: mutation.desired,
+                revision: mutation.revision,
+            })
+            .collect(),
     }
 }
 
@@ -150,6 +336,7 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
         false,
     );
     let mut error = String::new();
+    let mut trace = Vec::new();
     let mut data = match service.sync(&selection, &[]) {
         Ok(SyncResult::Success(data)) => data,
         Ok(SyncResult::Partial(data, problem)) => {
@@ -160,7 +347,15 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
     };
     if matches!(
         scenario,
-        "incremental" | "incomplete" | "refresh-5xx" | "refresh-auth"
+        "incremental"
+            | "incomplete"
+            | "refresh-5xx"
+            | "refresh-auth"
+            | "pagination-duplicate"
+            | "pagination-reordered"
+            | "pagination-growing-total"
+            | "pagination-shrinking-total"
+            | "pagination-malformed"
     ) {
         match service.sync(&selection, &[]) {
             Ok(SyncResult::Success(next)) => data = next,
@@ -175,7 +370,16 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
 
     if !matches!(
         scenario,
-        "initial" | "incremental" | "incomplete" | "refresh-5xx" | "refresh-auth"
+        "initial"
+            | "incremental"
+            | "incomplete"
+            | "refresh-5xx"
+            | "refresh-auth"
+            | "pagination-duplicate"
+            | "pagination-reordered"
+            | "pagination-growing-total"
+            | "pagination-shrinking-total"
+            | "pagination-malformed"
     ) {
         let store = Store::open(path).expect("reopen sync store");
         let mut receipt = match scenario {
@@ -194,6 +398,38 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
                 store.set_starred(&account, 1, true).unwrap();
                 None
             }
+            "read-cycle" => {
+                store.set_read(&account, &[1], true, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "read"));
+                store.set_read(&account, &[1], false, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "unread"));
+                store.set_read(&account, &[1], true, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "read-again"));
+                None
+            }
+            "read-identical" => {
+                store.set_read(&account, &[1], true, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "read"));
+                store.set_read(&account, &[1], true, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "read-identical"));
+                None
+            }
+            "star-cycle" => {
+                store.set_starred(&account, 1, true).unwrap();
+                trace.push(capture_sync_state(path, &account, "starred"));
+                store.set_starred(&account, 1, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "unstarred"));
+                store.set_starred(&account, 1, true).unwrap();
+                trace.push(capture_sync_state(path, &account, "starred-again"));
+                None
+            }
+            "star-identical" => {
+                store.set_starred(&account, 1, true).unwrap();
+                trace.push(capture_sync_state(path, &account, "starred"));
+                store.set_starred(&account, 1, true).unwrap();
+                trace.push(capture_sync_state(path, &account, "starred-identical"));
+                None
+            }
             "pending-stale" => {
                 store.set_read(&account, &[1], true, false).unwrap();
                 store.set_starred(&account, 1, true).unwrap();
@@ -201,6 +437,19 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
             }
             "partial-failure" | "full-failure" => {
                 store.set_read(&account, &[1, 2], true, false).unwrap();
+                None
+            }
+            "mixed-middle-retry" => {
+                store.set_read(&account, &[1], true, false).unwrap();
+                store.set_starred(&account, 1, true).unwrap();
+                store.set_read(&account, &[2], true, false).unwrap();
+                trace.push(capture_sync_state(path, &account, "queued"));
+                None
+            }
+            "restart-pending" => {
+                store.set_read(&account, &[1], true, false).unwrap();
+                store.set_starred(&account, 2, true).unwrap();
+                trace.push(capture_sync_state(path, &account, "before-restart"));
                 None
             }
             "undo-after-flush" => store.set_read(&account, &[1], true, true).unwrap(),
@@ -216,10 +465,17 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
             }
             _ => panic!("unknown sync scenario"),
         };
+        let store = if scenario == "restart-pending" {
+            drop(store);
+            trace.push(capture_sync_state(path, &account, "after-restart"));
+            Store::open(path).expect("restart sync store")
+        } else {
+            store
+        };
         let service = SyncService::new(
             store,
             Box::new(MinifluxClient::new(base, API_KEY).expect("remote")),
-            account,
+            account.clone(),
             false,
         );
         if scenario == "pending-stale" {
@@ -228,6 +484,15 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
                 Ok(SyncResult::Partial(_, problem)) => error = problem,
                 Err(problem) => error = problem,
             }
+        } else if scenario == "mixed-middle-retry" {
+            if service.flush().is_ok() {
+                panic!("mixed middle flush unexpectedly succeeded");
+            }
+            trace.push(capture_sync_state(path, &account, "middle-failed"));
+            if let Err(problem) = service.flush() {
+                error = problem;
+            }
+            trace.push(capture_sync_state(path, &account, "retried"));
         } else if let Err(problem) = service.flush() {
             error = problem;
         } else if scenario == "undo-after-flush" {
@@ -249,12 +514,20 @@ fn sync_probe(path: &Path, base: &str, scenario: &str) {
     let output = serde_json::json!({
         "error": if error.is_empty() { serde_json::Value::Null } else { error.into() },
         "snapshot": fluxcore::snapshot::assemble(&data),
+        "trace": trace,
     });
     println!("{}", serde_json::to_string(&output).unwrap());
 }
 
 /// Prints the Rust local snapshot for the fixture account as JSON.
-fn snapshot(path: &Path, kind: &str, id: i64, unread_only: bool, retain_csv: &str) {
+fn snapshot(
+    path: &Path,
+    kind: &str,
+    id: i64,
+    unread_only: bool,
+    retain_csv: &str,
+    newest_first: bool,
+) {
     let store = Store::open(path).expect("open fixture store");
     let account = account_id(FIXTURE_SERVER, FIXTURE_KEY);
     let retain_ids: Vec<i64> = retain_csv
@@ -263,7 +536,7 @@ fn snapshot(path: &Path, kind: &str, id: i64, unread_only: bool, retain_csv: &st
         .collect();
     let selection = fluxcore::domain::selection::Selection::normalize(kind, id, unread_only);
     let data = store
-        .local_snapshot(&account, &selection, false, &retain_ids)
+        .local_snapshot(&account, &selection, newest_first, &retain_ids)
         .expect("local snapshot");
     println!(
         "{}",

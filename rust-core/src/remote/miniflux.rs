@@ -29,11 +29,11 @@ pub struct MinifluxClient {
 }
 
 impl MinifluxClient {
-    /// Creates a client. A trailing slash is stripped like the Go client does
-    /// before each request. The API key is stored for the `X-Auth-Token`
-    /// header and never logged or embedded in errors.
+    /// Creates a client. Trailing slashes and a terminal `/v1` are stripped,
+    /// matching the upstream Go client before it appends API paths.
     pub fn new(endpoint: &str, api_key: &str) -> Result<Self, RemoteError> {
         let trimmed = endpoint.trim_end_matches('/');
+        let trimmed = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
         if trimmed.is_empty() {
             return Err(RemoteError::Transport(
                 "miniflux: empty endpoint provided".to_string(),
@@ -41,7 +41,9 @@ impl MinifluxClient {
         }
         let agent = ureq::AgentBuilder::new()
             .timeout(REQUEST_TIMEOUT)
-            .redirects(0)
+            // ureq counts the terminal response in this limit, so 10 matches
+            // Go http.Client's default limit of ten consecutive requests.
+            .redirects(10)
             .build();
         Ok(Self {
             agent,

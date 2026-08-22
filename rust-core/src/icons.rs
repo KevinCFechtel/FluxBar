@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
@@ -421,6 +422,25 @@ pub struct IconService {
 struct LoadSlot {
     ready: Mutex<bool>,
     condvar: Condvar,
+    waiters: AtomicUsize,
+}
+
+struct LoadGuard<'a> {
+    service: &'a IconService,
+    feed_id: i64,
+    slot: Arc<LoadSlot>,
+}
+
+impl Drop for LoadGuard<'_> {
+    fn drop(&mut self) {
+        self.service
+            .loads
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&self.feed_id);
+        *self.slot.ready.lock().unwrap_or_else(|p| p.into_inner()) = true;
+        self.slot.condvar.notify_all();
+    }
 }
 
 impl Default for IconService {
@@ -465,15 +485,24 @@ impl IconService {
 
             if let Some(slot) = slot {
                 let mut ready = slot.ready.lock().unwrap_or_else(|p| p.into_inner());
+                slot.waiters.fetch_add(1, Ordering::SeqCst);
                 while !*ready {
                     ready = slot.condvar.wait(ready).unwrap_or_else(|p| p.into_inner());
                 }
-                continue;
+                slot.waiters.fetch_sub(1, Ordering::SeqCst);
+                return self
+                    .cache
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get(&feed_id)
+                    .cloned()
+                    .unwrap_or_default();
             }
 
             let slot = Arc::new(LoadSlot {
                 ready: Mutex::new(false),
                 condvar: Condvar::new(),
+                waiters: AtomicUsize::new(0),
             });
             {
                 let mut loads = self.loads.lock().unwrap_or_else(|p| p.into_inner());
@@ -483,31 +512,32 @@ impl IconService {
                 loads.insert(feed_id, slot.clone());
             }
 
+            let _load_guard = LoadGuard {
+                service: self,
+                feed_id,
+                slot,
+            };
             let result = self.load_and_process(feed_id, remote);
-            self.cache
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .insert(feed_id, result.clone());
-            *slot.ready.lock().unwrap_or_else(|p| p.into_inner()) = true;
-            slot.condvar.notify_all();
-            self.loads
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .remove(&feed_id);
-            return result;
+            if let Ok(icon) = result {
+                self.cache
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(feed_id, icon.clone());
+                return icon;
+            }
+            return CachedIcon::default();
         }
     }
 
-    fn load_and_process(&self, feed_id: i64, remote: &dyn RemoteInbox) -> CachedIcon {
+    fn load_and_process(&self, feed_id: i64, remote: &dyn RemoteInbox) -> Result<CachedIcon, ()> {
         let data_url = match remote.icon_data_url(feed_id) {
             Ok(Some(url)) => url,
-            Ok(None) => return CachedIcon::default(),
-            Err(_) => return CachedIcon::default(),
+            Ok(None) | Err(_) => return Err(()),
         };
 
         let regular = match normalize_data_url(&data_url, DEFAULT_SIZE) {
             Ok(bytes) => bytes,
-            Err(_) => return CachedIcon::default(),
+            Err(_) => return Err(()),
         };
 
         let mode = BackgroundMode::from_env_lists(
@@ -521,7 +551,7 @@ impl IconService {
             Err(_) => Vec::new(),
         };
 
-        CachedIcon { regular, dark }
+        Ok(CachedIcon { regular, dark })
     }
 }
 
@@ -539,6 +569,55 @@ mod tests {
     use base64::Engine;
     use image::codecs::png::PngEncoder;
     use image::{ImageEncoder, Rgba, RgbaImage};
+
+    macro_rules! remote_stubs {
+        () => {
+            fn fetch_complete_selection(
+                &self,
+                _filter: &crate::remote::EntriesFilter,
+            ) -> Result<(Vec<crate::remote::EntryDto>, i64), crate::remote::RemoteError> {
+                Ok((Vec::new(), 0))
+            }
+
+            fn categories(
+                &self,
+            ) -> Result<Vec<crate::remote::CategoryDto>, crate::remote::RemoteError> {
+                Ok(Vec::new())
+            }
+
+            fn feeds(&self) -> Result<Vec<crate::remote::FeedDto>, crate::remote::RemoteError> {
+                Ok(Vec::new())
+            }
+
+            fn unread_counters(
+                &self,
+            ) -> Result<crate::remote::FeedCountersDto, crate::remote::RemoteError> {
+                Ok(crate::remote::FeedCountersDto {
+                    unreads: HashMap::new(),
+                })
+            }
+
+            fn starred_total(&self) -> Result<i64, crate::remote::RemoteError> {
+                Ok(0)
+            }
+
+            fn set_read_batch(
+                &self,
+                _entry_ids: &[i64],
+                _read: bool,
+            ) -> Result<(), crate::remote::RemoteError> {
+                Ok(())
+            }
+
+            fn entry_starred(&self, _entry_id: i64) -> Result<bool, crate::remote::RemoteError> {
+                Ok(false)
+            }
+
+            fn toggle_starred(&self, _entry_id: i64) -> Result<(), crate::remote::RemoteError> {
+                Ok(())
+            }
+        };
+    }
 
     fn encode_test_png(source: &RgbaImage) -> Vec<u8> {
         let mut output = Vec::new();
@@ -807,6 +886,151 @@ mod tests {
         let icon = service.feed_icon(1, &FakeRemote);
         assert!(icon.regular.is_empty());
         assert!(icon.dark.is_empty());
+    }
+
+    #[test]
+    fn icon_service_retries_failed_missing_and_malformed_loads() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct RetryRemote {
+            calls: [AtomicUsize; 3],
+            valid: String,
+        }
+
+        impl RemoteInbox for RetryRemote {
+            remote_stubs!();
+
+            fn icon_data_url(
+                &self,
+                feed_id: i64,
+            ) -> Result<Option<String>, crate::remote::RemoteError> {
+                let index = (feed_id - 1) as usize;
+                let call = self.calls[index].fetch_add(1, Ordering::SeqCst);
+                if call > 0 {
+                    return Ok(Some(self.valid.clone()));
+                }
+                match feed_id {
+                    1 => Err(crate::remote::RemoteError::Transport("offline".into())),
+                    2 => Ok(None),
+                    3 => Ok(Some("not an icon".into())),
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        let png = transparent_icon_png(Rgba([255, 255, 255, 255]));
+        let remote = RetryRemote {
+            calls: std::array::from_fn(|_| AtomicUsize::new(0)),
+            valid: format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png)
+            ),
+        };
+        let service = IconService::new();
+
+        for feed_id in 1..=3 {
+            assert!(service.feed_icon(feed_id, &remote).regular.is_empty());
+            assert!(!service.feed_icon(feed_id, &remote).regular.is_empty());
+            assert!(!service.feed_icon(feed_id, &remote).regular.is_empty());
+            assert_eq!(
+                remote.calls[(feed_id - 1) as usize].load(Ordering::SeqCst),
+                2
+            );
+        }
+    }
+
+    #[test]
+    fn icon_service_cleans_up_panicked_load_and_wakes_waiter() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        struct PanicRemote {
+            calls: AtomicUsize,
+            entered: (Mutex<bool>, Condvar),
+            release: (Mutex<bool>, Condvar),
+            valid: String,
+        }
+
+        impl RemoteInbox for PanicRemote {
+            remote_stubs!();
+
+            fn icon_data_url(
+                &self,
+                _feed_id: i64,
+            ) -> Result<Option<String>, crate::remote::RemoteError> {
+                if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    let mut entered = self.entered.0.lock().unwrap();
+                    *entered = true;
+                    self.entered.1.notify_all();
+                    drop(entered);
+
+                    let mut release = self.release.0.lock().unwrap();
+                    while !*release {
+                        release = self.release.1.wait(release).unwrap();
+                    }
+                    panic!("scripted icon load panic");
+                }
+                Ok(Some(self.valid.clone()))
+            }
+        }
+
+        let png = transparent_icon_png(Rgba([255, 255, 255, 255]));
+        let remote = Arc::new(PanicRemote {
+            calls: AtomicUsize::new(0),
+            entered: (Mutex::new(false), Condvar::new()),
+            release: (Mutex::new(false), Condvar::new()),
+            valid: format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png)
+            ),
+        });
+        let service = Arc::new(IconService::new());
+        let (leader_tx, leader_rx) = mpsc::channel();
+        let leader_service = Arc::clone(&service);
+        let leader_remote = Arc::clone(&remote);
+        std::thread::spawn(move || {
+            let panicked = catch_unwind(AssertUnwindSafe(|| {
+                leader_service.feed_icon(42, leader_remote.as_ref())
+            }))
+            .is_err();
+            leader_tx.send(panicked).unwrap();
+        });
+
+        let mut entered = remote.entered.0.lock().unwrap();
+        while !*entered {
+            entered = remote.entered.1.wait(entered).unwrap();
+        }
+        drop(entered);
+        let slot = service.loads.lock().unwrap().get(&42).unwrap().clone();
+
+        let (waiter_tx, waiter_rx) = mpsc::channel();
+        let waiter_service = Arc::clone(&service);
+        let waiter_remote = Arc::clone(&remote);
+        std::thread::spawn(move || {
+            waiter_tx
+                .send(waiter_service.feed_icon(42, waiter_remote.as_ref()))
+                .unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while slot.waiters.load(Ordering::SeqCst) == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "waiter did not join single-flight load"
+            );
+            std::thread::yield_now();
+        }
+
+        *remote.release.0.lock().unwrap() = true;
+        remote.release.1.notify_all();
+        assert!(leader_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        let icon = waiter_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(icon.regular.is_empty());
+        assert_eq!(remote.calls.load(Ordering::SeqCst), 1);
+
+        assert!(!service.feed_icon(42, remote.as_ref()).regular.is_empty());
+        assert_eq!(remote.calls.load(Ordering::SeqCst), 2);
     }
 
     fn dark_mode_variant_with_analysis(

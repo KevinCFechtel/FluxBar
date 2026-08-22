@@ -1,10 +1,9 @@
 //! Application runtime state: local configuration and the open store.
 //!
-//! Mirrors the local subset of `go-core/internal/coreapi` Runtime behavior.
+//! Mirrors `go-core/internal/coreapi` Runtime behavior.
 //! Go's `configure` has no remote effects (validation, account upsert, engine
 //! creation only), so a network-free implementation reproduces its observable
-//! contract. Validation errors are currently English-only; localization
-//! parity is deferred to Phase 9.
+//! contract. Validation errors use the shared localization catalogs.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -327,14 +326,34 @@ fn validate_configuration(
 }
 
 fn has_http_host(candidate: &str) -> bool {
-    let Some((scheme, remainder)) = candidate.split_once("://") else {
-        return false;
-    };
-    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
-        return false;
-    }
-    let authority = remainder.split(['/', '?', '#']).next().unwrap_or_default();
-    !authority.is_empty()
+    let parsed = url::Url::parse(candidate).or_else(|error| {
+        if error != url::ParseError::InvalidPort {
+            return Err(error);
+        }
+        // Go accepts an all-numeric port above 65535 during URL parsing. Use a
+        // valid placeholder only for validation and preserve the original URL.
+        let scheme_end = candidate.find("://").ok_or(error)? + 3;
+        let authority_end = candidate[scheme_end..]
+            .find(['/', '?', '#'])
+            .map_or(candidate.len(), |index| scheme_end + index);
+        let authority = &candidate[scheme_end..authority_end];
+        let colon = authority.rfind(':').ok_or(error)?;
+        let port = &authority[colon + 1..];
+        if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(error);
+        }
+        let port_start = scheme_end + colon + 1;
+        let replacement = format!(
+            "{}1{}",
+            &candidate[..port_start],
+            &candidate[authority_end..]
+        );
+        url::Url::parse(&replacement)
+    });
+    parsed.is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https")
+            && url.host_str().is_some_and(|host| !host.is_empty())
+    })
 }
 
 /// Production database location. macOS-only resolution for now, mirroring Go's
@@ -409,6 +428,10 @@ mod tests {
         assert!(validate_configuration("HTTPS://M.EXAMPLE", "k", &[]).is_ok());
         assert!(validate_configuration("http://", "k", &[]).is_err());
         assert!(validate_configuration("ftp://m.example", "k", &[]).is_err());
+        assert!(validate_configuration("http://exa mple.com", "k", &[]).is_err());
+        assert!(validate_configuration("http://[::1", "k", &[]).is_err());
+        assert!(validate_configuration("http://example.com:bad", "k", &[]).is_err());
+        assert!(validate_configuration("http://example.com:65536", "k", &[]).is_ok());
     }
 
     #[test]
@@ -461,6 +484,63 @@ mod tests {
             guard.as_ref().unwrap().config.account_id.clone()
         };
         assert_ne!(first_account, replaced);
+    }
+
+    #[test]
+    fn account_switching_isolated_and_stale_configuration_still_upserts() {
+        let directory = test_directory();
+        let database_path = directory.path().join("inbox.sqlite3");
+        let runtime = AppRuntime::with_database_path(database_path.clone());
+
+        assert!(
+            runtime
+                .configure("https://a.example", "a", false, 1, &[])
+                .ok
+        );
+        let account_a = locked(&runtime.session)
+            .as_ref()
+            .unwrap()
+            .config
+            .account_id
+            .clone();
+        assert!(
+            runtime
+                .configure("https://b.example", "b", false, 2, &[])
+                .ok
+        );
+        let account_b = locked(&runtime.session)
+            .as_ref()
+            .unwrap()
+            .config
+            .account_id
+            .clone();
+        assert_ne!(account_a, account_b);
+
+        assert!(
+            runtime
+                .configure("https://stale.example", "stale", false, 1, &[])
+                .ok
+        );
+        assert_eq!(
+            locked(&runtime.session).as_ref().unwrap().config.account_id,
+            account_b
+        );
+
+        assert!(
+            runtime
+                .configure("https://a.example", "a", false, 3, &[])
+                .ok
+        );
+        assert_eq!(
+            locked(&runtime.session).as_ref().unwrap().config.account_id,
+            account_a
+        );
+
+        let database = rusqlite::Connection::open(database_path).unwrap();
+        let account_count: i64 = database
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(account_count, 3);
     }
 
     #[test]

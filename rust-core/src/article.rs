@@ -203,6 +203,16 @@ fn first_image_url(node: &Handle, base: Option<&url::Url>) -> String {
             return candidate;
         }
     }
+    if let NodeData::Element {
+        template_contents, ..
+    } = &node.data
+        && let Some(contents) = template_contents.borrow().as_ref()
+    {
+        let candidate = first_image_url(contents, base);
+        if !candidate.is_empty() {
+            return candidate;
+        }
+    }
     String::new()
 }
 

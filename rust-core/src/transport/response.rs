@@ -103,10 +103,26 @@ pub struct BrowseSnapshot {
 /// Feed icon payload.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Icon {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_bytes"
+    )]
     pub regular: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        serialize_with = "serialize_bytes"
+    )]
     pub dark: Vec<u8>,
+}
+
+fn serialize_bytes<S>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use base64::Engine;
+    serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 /// Mutation receipt payload.
@@ -183,5 +199,27 @@ impl Response {
     pub fn to_json(&self) -> String {
         serde_json::to_string(self)
             .unwrap_or_else(|_| r#"{"ok":false,"error":"encode response"}"#.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Icon, Response};
+
+    #[test]
+    fn icon_bytes_use_go_base64_wire_format_and_omit_empty_variants() {
+        let response = Response {
+            ok: true,
+            icon: Some(Icon {
+                regular: vec![0, 1, 2, 255],
+                dark: Vec::new(),
+            }),
+            ..Response::default()
+        };
+
+        assert_eq!(
+            response.to_json(),
+            r#"{"ok":true,"icon":{"regular":"AAEC/w=="}}"#
+        );
     }
 }

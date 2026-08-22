@@ -26,10 +26,10 @@ even though the lower-level `Build/build-go-core.sh` script can combine
 multiple architectures.
 
 `Build/build-rust.sh` builds the same native application against the Rust
-core in `rust-core/`. The Rust core is experimental through migration Phase 8:
-sync and mutations are implemented, while supporting services such as feed
-icons and localization remain incomplete. It is useful for compatibility
-testing and linker validation, not for production or daily use.
+core in `rust-core/`. All current public operations are implemented, but the
+Phase 10 audit still classifies Rust as experimental because concurrency and
+whole-operation deadline parity are unresolved. It remains a compatibility and
+development candidate, not the production release core.
 
 `Build/release-go.sh` implements the direct-distribution path for the
 Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It
@@ -43,7 +43,7 @@ future work.
 The user-facing name is FluxBar. The app bundle/executable name
 `FluxBar.app`, bundle identifier `dev.kevincfechtel.FluxBar`, and
 current Keychain service retain the FluxBar identity for compatibility.
-The native minimum system version is macOS 13.
+The native minimum system version is macOS 15.
 
 Native app metadata lives in `macos/FluxBar/Info.plist`, while the
 release script currently reads its version from `Build/Info.plist`.
@@ -111,7 +111,9 @@ explicitly changes the default.
 
 `Build/build.sh` is a developer build selector; it is not a release
 script. `Build/release-go.sh` remains the current production release
-path and continues to call `Build/build-go.sh`.
+path and calls `Build/build-go.sh` with `FLUX_CORE=go` explicitly. An inherited
+developer-shell value such as `FLUX_CORE=rust` cannot select Rust for this
+release path.
 
 Rust build artifacts may be produced for development and compatibility
 testing, but adding Rust must not silently alter signing, notarization,

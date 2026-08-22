@@ -48,6 +48,15 @@ fn auth_header_user_agent_and_url_joining() {
 }
 
 #[test]
+fn terminal_v1_endpoint_is_not_duplicated() {
+    let server = FakeServer::start(vec![page(&[1], 1)]);
+    let client = MinifluxClient::new(&format!("{}/v1/", server.base_url), KEY).expect("client");
+    client.entries(&EntriesFilter::default()).expect("entries");
+
+    assert_eq!(server.next_request().path, "/v1/entries?limit=0&offset=0");
+}
+
+#[test]
 fn empty_endpoint_is_rejected_without_network() {
     assert!(matches!(
         MinifluxClient::new("", KEY),

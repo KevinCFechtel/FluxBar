@@ -13,61 +13,67 @@ if [[ "${#ARCHS[@]}" -eq 0 ]]; then
   exit 1
 fi
 
-mkdir -p "${OUTPUT_DIR}"
-
-# Verify that the requested Rust target is installed. The build script does
-# not modify the developer or CI toolchain automatically.
-require_target() {
-  local target="$1"
-  if ! rustup target list --installed | grep -qx "${target}"; then
-    echo "Erforderliches Rust-Ziel ist nicht installiert: ${target}" >&2
-    echo "" >&2
-    echo "Installieren mit:" >&2
-    echo "    rustup target add ${target}" >&2
-    exit 1
-  fi
-}
-
-archives=()
+targets=()
 for arch in "${ARCHS[@]}"; do
   case "${arch}" in
     arm64)
-      target="aarch64-apple-darwin"
+      targets+=("aarch64-apple-darwin")
       ;;
     x86_64)
-      target="x86_64-apple-darwin"
+      targets+=("x86_64-apple-darwin")
       ;;
     *)
       echo "Nicht unterstützte macOS-Architektur: ${arch}" >&2
       exit 1
       ;;
   esac
-
-  require_target "${target}"
-
-  arch_dir="${OUTPUT_DIR}/${arch}"
-  mkdir -p "${arch_dir}"
-
-  MACOSX_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" cargo build \
-    --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
-    --target "${target}" \
-    --release
-
-  cp "${REPOSITORY_DIR}/rust-core/target/${target}/release/libfluxcore.a" \
-    "${arch_dir}/libfluxcore.a"
-  archives+=("${arch_dir}/libfluxcore.a")
 done
 
-if [[ "${#archives[@]}" -eq 1 ]]; then
-  cp "${archives[0]}" "${OUTPUT_DIR}/libfluxcore.a"
-else
-  xcrun lipo -create "${archives[@]}" -output "${OUTPUT_DIR}/libfluxcore.a"
+if ! command -v rustup >/dev/null 2>&1; then
+  echo "Benötigtes Programm fehlt: rustup" >&2
+  echo "Die installierten Rust-Ziele können nicht geprüft werden." >&2
+  exit 1
 fi
 
-cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/libfluxcore.h"
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Benötigtes Programm fehlt: cargo" >&2
+  exit 1
+fi
 
-# Smoke-test the produced static library by compiling and running a tiny C
-# caller. This proves the expected C symbols are exported and callable.
+if ! installed_targets="$(rustup target list --installed)"; then
+  echo "Installierte Rust-Ziele konnten nicht ermittelt werden." >&2
+  exit 1
+fi
+
+missing_targets=()
+for target in "${targets[@]}"; do
+  if ! grep -Fqx -- "${target}" <<< "${installed_targets}"; then
+    missing_targets+=("${target}")
+  fi
+done
+
+if [[ "${#missing_targets[@]}" -ne 0 ]]; then
+  for target in "${missing_targets[@]}"; do
+    echo "Erforderliches Rust-Ziel ist nicht installiert: ${target}" >&2
+    echo "Installieren mit: rustup target add ${target}" >&2
+  done
+  echo "Das Build-Skript verändert die Rust-Toolchain nicht." >&2
+  exit 1
+fi
+
+CLANG="$(xcrun --sdk macosx --find clang)"
+SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+
+verify_archive() {
+  local arch="$1"
+  local archive="$2"
+
+  if ! xcrun lipo "${archive}" -verify_arch "${arch}" >/dev/null; then
+    echo "Rust-Archiv enthält nicht die erwartete Architektur ${arch}: ${archive}" >&2
+    exit 1
+  fi
+}
+
 SMOKE_DIR="$(mktemp -d)"
 trap 'rm -rf "${SMOKE_DIR}"' EXIT
 
@@ -99,9 +105,44 @@ int main(void) {
 }
 EOF
 
-cc -mmacosx-version-min="${DEPLOYMENT_TARGET}" \
-  -o "${SMOKE_DIR}/smoke" "${SMOKE_DIR}/smoke.c" "${OUTPUT_DIR}/libfluxcore.a" \
-  -framework CoreFoundation -framework Security
-"${SMOKE_DIR}/smoke"
+mkdir -p "${OUTPUT_DIR}"
+
+archives=()
+for index in "${!ARCHS[@]}"; do
+  arch="${ARCHS[${index}]}"
+  target="${targets[${index}]}"
+
+  arch_dir="${OUTPUT_DIR}/${arch}"
+  mkdir -p "${arch_dir}"
+
+  MACOSX_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" cargo build \
+    --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
+    --target "${target}" \
+    --release
+
+  cp "${REPOSITORY_DIR}/rust-core/target/${target}/release/libfluxcore.a" \
+    "${arch_dir}/libfluxcore.a"
+  verify_archive "${arch}" "${arch_dir}/libfluxcore.a"
+
+  "${CLANG}" -arch "${arch}" -isysroot "${SDK_PATH}" \
+    -mmacosx-version-min="${DEPLOYMENT_TARGET}" \
+    -o "${SMOKE_DIR}/smoke-${arch}" "${SMOKE_DIR}/smoke.c" \
+    "${arch_dir}/libfluxcore.a" \
+    -framework CoreFoundation -framework Security
+
+  if [[ "$(uname -m)" == "${arch}" ]]; then
+    "${SMOKE_DIR}/smoke-${arch}"
+  fi
+
+  archives+=("${arch_dir}/libfluxcore.a")
+done
+
+if [[ "${#archives[@]}" -eq 1 ]]; then
+  cp "${archives[0]}" "${OUTPUT_DIR}/libfluxcore.a"
+else
+  xcrun lipo -create "${archives[@]}" -output "${OUTPUT_DIR}/libfluxcore.a"
+fi
+
+cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/libfluxcore.h"
 
 echo "Rust core static library: ${OUTPUT_DIR}/libfluxcore.a"

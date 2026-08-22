@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Differential Miniflux remote-adapter harness (Phase 7).
 #
-# Starts one deterministic fake Miniflux server on a fixed port, points the
+# Starts one deterministic fake Miniflux server on an OS-assigned port, points the
 # production Go Browse path and the Rust remote adapter at it, and compares
 # the resulting snapshot JSON semantically. Also verifies both sides reject
 # a truncated paginated sequence (second server mode).
@@ -12,8 +12,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
 KEY="diff-fake-key"
-PORT=18477
-BASE="http://127.0.0.1:${PORT}"
+PORT=""
+BASE=""
 
 SERVER_PID=""
 cleanup() {
@@ -51,10 +51,10 @@ PYEOF
   fi
 }
 
-echo "Starting fake Miniflux server on ${PORT}"
+echo "Starting fake Miniflux server"
 cat > "${WORK_DIR}/fake_server.py" <<'PY'
 import importlib.util, json, re, sys
-port = int(sys.argv[1]); mode = sys.argv[2]
+port = int(sys.argv[1]); mode = sys.argv[2]; port_path = sys.argv[4]
 spec = importlib.util.spec_from_file_location("fake", sys.argv[3])
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
@@ -71,14 +71,28 @@ if mode == "truncate":
             mod.entry(e, mod.STATES[e], e in mod.STARRED) for e in page]}).encode()
     mod.paged = paged
 
-HTTPServer(("127.0.0.1", port), mod.Handler).serve_forever()
+server = HTTPServer(("127.0.0.1", port), mod.Handler)
+with open(port_path, "w", encoding="utf-8") as port_file:
+    port_file.write(str(server.server_address[1]))
+server.serve_forever()
 PY
 
 launch() {
-  python3 "${WORK_DIR}/fake_server.py" "${PORT}" "$1" "${SCRIPT_DIR}/testdata/fake_miniflux.py" &
+  local port_file="${WORK_DIR}/server.port"
+  rm -f "${port_file}"
+  python3 "${WORK_DIR}/fake_server.py" 0 "$1" "${SCRIPT_DIR}/testdata/fake_miniflux.py" "${port_file}" &
   SERVER_PID=$!
   for _ in $(seq 1 50); do
-    if nc -z 127.0.0.1 "${PORT}" 2>/dev/null; then return; fi
+    if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+      wait "${SERVER_PID}" || true
+      echo "server exited during startup" >&2
+      exit 1
+    fi
+    if [[ -s "${port_file}" ]]; then
+      PORT="$(<"${port_file}")"
+      BASE="http://127.0.0.1:${PORT}"
+      if nc -z 127.0.0.1 "${PORT}" 2>/dev/null; then return; fi
+    fi
     sleep 0.1
   done
   echo "server failed to start"; exit 1
@@ -116,5 +130,7 @@ if [[ "${GO_STATUS}" -ne 0 && "${RUST_STATUS}" -ne 0 ]]; then
 else
   echo "FAIL  truncated-pagination (go=${GO_STATUS}, rust=${RUST_STATUS})"; exit 1
 fi
+
+stop
 
 echo "Remote differential tests passed."

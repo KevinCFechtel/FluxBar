@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "name": "opaque-square",
+      "width": 32,
+      "height": 32,
+      "background": [240, 80, 20, 255],
+      "foreground": [240, 80, 20, 255],
+      "inset": 0
+    },
+    {
+      "name": "bright-wide",
+      "width": 16,
+      "height": 8,
+      "background": [255, 255, 255, 255],
+      "foreground": [255, 255, 255, 255],
+      "inset": 0
+    },
+    {
+      "name": "dark-transparent",
+      "width": 32,
+      "height": 32,
+      "background": [0, 0, 0, 0],
+      "foreground": [0, 0, 0, 255],
+      "inset": 6
+    },
+    {
+      "name": "malformed",
+      "malformed": true
+    }
+  ]
+}

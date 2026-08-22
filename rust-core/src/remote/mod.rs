@@ -118,7 +118,7 @@ pub trait RemoteInbox: Send {
     fn unread_counters(&self) -> Result<FeedCountersDto, RemoteError>;
     fn starred_total(&self) -> Result<i64, RemoteError>;
 
-    /// Raw remote icon data URL; processing/caching remains Phase 9.
+    /// Raw remote icon data URL; processing/caching belongs to `icons`.
     fn icon_data_url(&self, feed_id: i64) -> Result<Option<String>, RemoteError>;
 
     /// Low-level remote mutations; scheduling/orchestration stays in Phase 8.

@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlsplit
 PORT = int(sys.argv[1])
 MODE = sys.argv[2]
 LOG_PATH = sys.argv[3]
+PORT_PATH = sys.argv[4]
 
 entries = {
     1: {
@@ -33,6 +34,22 @@ entries = {
 mutation_count = 0
 counters_count = 0
 selection_count = 0
+
+PAGINATION_MODES = {
+    "pagination-duplicate", "pagination-reordered", "pagination-growing-total",
+    "pagination-shrinking-total", "pagination-malformed",
+}
+
+def add_pagination_entries():
+    for entry_id in range(3, 203):
+        entries[entry_id] = {
+            "id": entry_id, "feed_id": 20, "title": f"Entry {entry_id}",
+            "url": f"https://example.com/{entry_id}", "comments_url": "",
+            "status": "unread", "starred": False,
+            "published_at": f"2026-08-22T10:{entry_id // 60:02d}:{entry_id % 60:02d}Z",
+            "content": "", "enclosures": [],
+            "feed": {"id": 20, "title": "Feed", "category": {"id": 10, "title": "Category"}},
+        }
 
 def send(handler, status, value=None):
     body = b"" if value is None else json.dumps(value, separators=(",", ":")).encode()
@@ -80,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
                 entries[1]["status"] = "read"
                 entries[1]["starred"] = True
                 entries[3] = {"id": 3, "feed_id": 20, "title": "Three", "url": "https://example.com/3", "comments_url": "", "status": "unread", "starred": False, "published_at": "2026-08-22T10:00:03Z", "content": "", "feed": {"id": 20, "title": "Feed", "category": {"id": 10, "title": "Category"}}}
+            if MODE in PAGINATION_MODES and counters_count == 2:
+                add_pagination_entries()
             unread = sum(value["status"] == "unread" for value in entries.values())
             return send(self, 200, {"reads": {}, "unreads": {"20": unread}})
         if split.path == "/v1/categories":
@@ -97,15 +116,31 @@ class Handler(BaseHTTPRequestHandler):
                 selected = [value for value in selected if value["status"] in statuses]
             if query.get("starred") == ["1"]:
                 selected = [value for value in selected if value["starred"]]
-            after = int(query.get("after_entry_id", [0])[0])
-            selected = [value for value in selected if value["id"] > after]
             selected.sort(key=lambda value: value["id"])
             total = len(selected)
+            after = int(query.get("after_entry_id", [0])[0])
+            selected = [value for value in selected if value["id"] > after]
             limit = int(query.get("limit", [len(selected) or 1])[0])
             if query.get("order") == ["id"]:
                 selection_count += 1
                 if MODE == "incomplete" and selection_count == 2:
                     total += 1
+                if MODE == "pagination-malformed" and selection_count == 2:
+                    body = b"{not json"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if MODE == "pagination-reordered" and selection_count == 2:
+                    selected[0], selected[1] = selected[1], selected[0]
+                if MODE == "pagination-duplicate" and selection_count == 2:
+                    selected[1] = selected[0]
+                if MODE == "pagination-growing-total" and selection_count == 2:
+                    total -= 1
+                if MODE == "pagination-shrinking-total" and selection_count == 3:
+                    total -= 1
             return send(self, 200, {"total": total, "entries": selected[:limit]})
         return send(self, 404)
 
@@ -129,4 +164,7 @@ class Handler(BaseHTTPRequestHandler):
             return send(self, 204)
         return send(self, 404)
 
-HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+server = HTTPServer(("127.0.0.1", PORT), Handler)
+with open(PORT_PATH, "w", encoding="utf-8") as port_file:
+    port_file.write(str(server.server_address[1]))
+server.serve_forever()

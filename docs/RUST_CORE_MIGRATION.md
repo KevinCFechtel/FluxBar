@@ -429,6 +429,22 @@ Differential coverage:
     locale fallback, unknown-key fallback, missing-locale fallback, English and
     German plural forms, and fallback plural rendering.
 
+### Phase 9.3 --- Feed icons
+
+Implemented in `rust-core/src/icons.rs` and the runtime/dispatcher adapters:
+
+-   data-URL decoding plus raster/SVG normalization to a 32x32 PNG;
+-   regular/dark variant generation with Go-compatible appearance thresholds;
+-   process-local cache and same-feed single-flight load deduplication;
+-   failed, missing, and malformed loads remain retryable rather than cached;
+-   RAII cleanup removes stale load slots and wakes waiters during panic
+    unwinding;
+-   public icon bytes use Go's base64 JSON-string representation.
+
+`Build/test-icon-compat.sh` compares decoded RGBA results and verifies that each
+response field contains its implementation's processed PNG bytes. PNG
+container bytes may differ between encoders.
+
 ## Phase 10 --- Full Rust-backed application validation
 
 Manually validate at least:
@@ -448,6 +464,28 @@ Manually validate at least:
 -   feed icons;
 -   localization;
 -   restart persistence.
+
+### Phase 10 audit result (2026-08-22)
+
+**Decision: NOT READY.** All 11 operations exist and broad differential,
+bidirectional SQLite, clean multi-architecture artifact, native unit-test, and
+Go/Rust UI-smoke validation passed. The audit also found and fixed transport,
+icon, endpoint, URL-validation, article-template, and pluralization defects.
+
+The development-default gate remains closed because Rust's single
+`SyncService` inner mutex serializes local reads/mutations behind remote and
+icon work, unlike Go. Neither implementation cancels every lock wait, but the
+Rust lock covers substantially more work and can delay nominally local
+operations behind remote I/O. A focused orchestration/deadline remediation
+phase is required before Phase 11. Go remains production/reference and Rust
+remains experimental.
+
+Recorded engineering validation on 2026-08-22 included arm64/x86_64 universal
+core builds, both 16-test native XCTest runs, and the built-in
+`--ui-smoke-test` for Go- and Rust-backed apps. The smoke path validates native
+layout with a synthetic snapshot; it does not exercise live core startup or
+the manual product scenarios above. Live configuration, offline behavior,
+startup scheduling, and restart persistence remain outstanding manual checks.
 
 ## Phase 11 --- Rust becomes development default
 

@@ -79,9 +79,13 @@ fn process(input: Input, runtime: &AppRuntime) -> String {
 }
 
 fn handle_json(json: &str, runtime: &AppRuntime) -> String {
-    let request: Request = match serde_json::from_str(json) {
-        Ok(r) => r,
-        Err(e) => return Response::invalid_request(&e.to_string()).to_json(),
+    let request: Request = if json.trim() == "null" {
+        Request::default()
+    } else {
+        match crate::transport::request::parse_request(json) {
+            Ok(r) => r,
+            Err(e) => return Response::invalid_request(&e.to_string()).to_json(),
+        }
     };
 
     let operation = match request.into_operation() {
@@ -167,6 +171,15 @@ mod tests {
             assert!(response.contains("unknown"));
             FluxCoreFree(ptr);
         }
+    }
+
+    #[test]
+    fn root_json_null_uses_empty_request_defaults() {
+        let response = handle_json("null", &AppRuntime::new());
+        assert_eq!(
+            response,
+            r#"{"ok":false,"error":"unsupported operation \"\""}"#
+        );
     }
 
     #[test]

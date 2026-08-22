@@ -79,6 +79,31 @@
       "one_fallback": "FluxBar — {{.Count}} unread article",
       "other_fallback": "FluxBar — {{.Count}} unread articles",
       "count": 5
+    },
+    {
+      "name": "ordered_locale_fallback",
+      "operation": "text",
+      "locales": ["fr-FR", "de-AT", "en-US"],
+      "key": "menu.refresh",
+      "fallback": "fallback"
+    },
+    {
+      "name": "negative_plural_uses_other",
+      "operation": "plural",
+      "locales": ["de-DE"],
+      "key": "missing.plural",
+      "one_fallback": "{{.Count}} item",
+      "other_fallback": "{{.Count}} items",
+      "count": -1
+    },
+    {
+      "name": "large_64_bit_plural_count",
+      "operation": "plural",
+      "locales": ["en-US"],
+      "key": "missing.plural",
+      "one_fallback": "{{.Count}} item",
+      "other_fallback": "{{.Count}} items",
+      "count": 3000000000
     }
   ]
 }

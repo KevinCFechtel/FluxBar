@@ -30,9 +30,10 @@ rust_snapshot() {
 
 compare_case() {
   local label="$1" database="$2" kind="$3" id="$4" unread_only="$5" retain="$6"
-  go_helper snapshot "${database}" "${kind}" "${id}" "${unread_only}" "${retain}" \
+  local newest_first="${7:-false}"
+  go_helper snapshot "${database}" "${kind}" "${id}" "${unread_only}" "${retain}" "${newest_first}" \
     > "${WORK_DIR}/go.json"
-  rust_snapshot "${database}" "${kind}" "${id}" "${unread_only}" "${retain}" \
+  rust_snapshot "${database}" "${kind}" "${id}" "${unread_only}" "${retain}" "${newest_first}" \
     > "${WORK_DIR}/rust.json"
   if python3 - "${WORK_DIR}/go.json" "${WORK_DIR}/rust.json" <<'PYEOF'
 import json, sys
@@ -59,10 +60,22 @@ BASIC="${WORK_DIR}/basic.sqlite3"
 LARGE="${WORK_DIR}/large.sqlite3"
 MULTI="${WORK_DIR}/multi.sqlite3"
 EMPTY="${WORK_DIR}/empty.sqlite3"
+COUNT_0="${WORK_DIR}/count-0.sqlite3"
+COUNT_1="${WORK_DIR}/count-1.sqlite3"
+COUNT_199="${WORK_DIR}/count-199.sqlite3"
+COUNT_200="${WORK_DIR}/count-200.sqlite3"
+COUNT_201="${WORK_DIR}/count-201.sqlite3"
+COUNT_205="${WORK_DIR}/count-205.sqlite3"
 go_helper fixture-basic  "${BASIC}"
 go_helper fixture-large  "${LARGE}"
 go_helper fixture-multi  "${MULTI}"
 go_helper fixture-empty  "${EMPTY}"
+go_helper fixture-count  "${COUNT_0}" 0
+go_helper fixture-count  "${COUNT_1}" 1
+go_helper fixture-count  "${COUNT_199}" 199
+go_helper fixture-count  "${COUNT_200}" 200
+go_helper fixture-count  "${COUNT_201}" 201
+go_helper fixture-count  "${COUNT_205}" 205
 
 echo "Selection kinds on basic fixture"
 compare_case "empty-database/all"          "${EMPTY}" "all"       0 false ""
@@ -74,6 +87,8 @@ compare_case "feed"                        "${BASIC}" "feed"    100 false ""
 compare_case "missing-operation-selection" "${BASIC}" ""          0 false ""
 compare_case "unknown-kind-fallback"       "${BASIC}" "bogus"     4 false ""
 compare_case "category-zero-id-fallback"   "${BASIC}" "category"  0 false ""
+compare_case "equal-timestamps/oldest-first" "${BASIC}" "all"     0 false "" false
+compare_case "equal-timestamps/newest-first" "${BASIC}" "all"     0 false "" true
 
 echo "unreadOnly combinations"
 compare_case "all+unreadOnly"              "${BASIC}" "all"      0 true ""
@@ -81,17 +96,26 @@ compare_case "starred+unreadOnly"          "${BASIC}" "starred"  0 true ""
 compare_case "feed+unreadOnly"             "${BASIC}" "feed"   100 true ""
 
 echo "Presentation retention"
-# Entry 2 is locally read; retaining it must keep it in the unread view.
-compare_case "retain-read-entry"           "${BASIC}" "unread" 0 true "2,3"
+# Entries 2, 5, and 205 are locally read. Entry 205 sorts ahead of the normal
+# newest-first unread page, while entries 2 and 5 exercise multiple retention.
+compare_case "retain-read-entry"                     "${BASIC}" "unread" 0 true "2"
+compare_case "large/retained-read-outside-page"      "${LARGE}" "unread" 0 true "205" true
+compare_case "large/multiple-retained-read-ids"      "${LARGE}" "unread" 0 true "2,5"
+compare_case "large/missing-retained-id"             "${LARGE}" "unread" 0 true "99999"
 
 echo "Account isolation"
 compare_case "multi-account/all"           "${MULTI}" "all"      0 false ""
 compare_case "multi-account/category"      "${MULTI}" "category" 10 false ""
+compare_case "multi-account/wrong-account-retained-id" "${MULTI}" "unread" 0 true "900"
 
-echo "200-entry presentation limit"
-compare_case "large/below-limit"           "${LARGE}" "unread" 0 false ""
-compare_case "large/exact-201-rows"        "${LARGE}" "all"    0 false ""
-compare_case "large/retained-outside-page" "${LARGE}" "unread" 0 true "204"
+echo "0/1/199/200/201/>200 presentation boundaries"
+compare_case "boundary/exact-0"            "${COUNT_0}"   "all" 0 false ""
+compare_case "boundary/exact-1"            "${COUNT_1}"   "all" 0 false ""
+compare_case "boundary/exact-199"          "${COUNT_199}" "all" 0 false ""
+compare_case "boundary/exact-200"          "${COUNT_200}" "all" 0 false ""
+compare_case "boundary/exact-201"          "${COUNT_201}" "all" 0 false ""
+compare_case "boundary/above-200-exact-205" "${COUNT_205}" "all" 0 false "" true
+compare_case "large/exact-205-mixed-status-rows" "${LARGE}" "all" 0 false ""
 
 echo "Unknown persisted EntryStatus"
 compare_case "unknown-status-row"          "${BASIC}" "all"    0 false ""

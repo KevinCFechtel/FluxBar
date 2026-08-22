@@ -1,19 +1,154 @@
 //! External JSON request envelope and operation-specific typed requests.
 
-use serde::Deserialize;
+use std::fmt;
+
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+fn deserialize_null_default_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<Vec<Option<T>>>::deserialize(deserializer)?
+        .unwrap_or_default()
+        .into_iter()
+        .map(Option::unwrap_or_default)
+        .collect())
+}
+
+const REQUEST_FIELDS: &[&str] = &[
+    "operation",
+    "server",
+    "apiKey",
+    "newestFirst",
+    "configurationGeneration",
+    "locales",
+    "key",
+    "fallback",
+    "oneFallback",
+    "otherFallback",
+    "count",
+    "selection",
+    "entryID",
+    "entryIDs",
+    "retainEntryIDs",
+    "read",
+    "mutationSource",
+    "mutationID",
+    "currentStarred",
+    "desiredStarred",
+    "feedID",
+    "feedName",
+];
+
+/// Decodes the public envelope with Go encoding/json's case-insensitive
+/// struct-field matching.
+pub fn parse_request(json: &str) -> Result<Request, serde_json::Error> {
+    let mut deserializer = serde_json::Deserializer::from_str(json);
+    let value = deserializer.deserialize_map(RequestMapVisitor)?;
+    deserializer.end()?;
+    serde_json::from_value(value)
+}
+
+struct RequestMapVisitor;
+
+impl<'de> Visitor<'de> for RequestMapVisitor {
+    type Value = serde_json::Value;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a request object")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut object = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            let canonical = REQUEST_FIELDS
+                .iter()
+                .find(|field| field.eq_ignore_ascii_case(&key))
+                .copied()
+                .unwrap_or(key.as_str());
+            let value = if canonical == "selection" {
+                map.next_value::<Option<Selection>>()?.map_or(
+                    serde_json::Value::Null,
+                    |selection| {
+                        serde_json::json!({
+                            "kind": selection.kind,
+                            "id": selection.id,
+                            "unreadOnly": selection.unread_only,
+                        })
+                    },
+                )
+            } else {
+                map.next_value::<serde_json::Value>()?
+            };
+            // Insertion occurs in source order, preserving Go's behavior when
+            // case-equivalent keys occur more than once.
+            object.insert(canonical.to_string(), value);
+        }
+        Ok(serde_json::Value::Object(object))
+    }
+}
 
 /// Article selection descriptor shared by many operations.
 ///
 /// This is the wire-level DTO; the domain representation lives in
 /// `crate::domain::selection` and is produced via [`Selection::to_domain`].
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Selection {
-    #[serde(default)]
     pub kind: String,
-    #[serde(default)]
     pub id: i64,
-    #[serde(default, rename = "unreadOnly")]
     pub unread_only: bool,
+}
+
+impl<'de> Deserialize<'de> for Selection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SelectionVisitor;
+
+        impl<'de> Visitor<'de> for SelectionVisitor {
+            type Value = Selection;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a selection object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut selection = Selection::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    if key.eq_ignore_ascii_case("kind") {
+                        selection.kind = map.next_value::<Option<String>>()?.unwrap_or_default();
+                    } else if key.eq_ignore_ascii_case("id") {
+                        selection.id = map.next_value::<Option<i64>>()?.unwrap_or_default();
+                    } else if key.eq_ignore_ascii_case("unreadOnly") {
+                        selection.unread_only =
+                            map.next_value::<Option<bool>>()?.unwrap_or_default();
+                    } else {
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+                Ok(selection)
+            }
+        }
+
+        deserializer.deserialize_map(SelectionVisitor)
+    }
 }
 
 impl Selection {
@@ -27,51 +162,107 @@ impl Selection {
 /// External request envelope. Fields use the same JSON names as the Go core.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Request {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub operation: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub server: String,
-    #[serde(default, rename = "apiKey")]
+    #[serde(
+        default,
+        rename = "apiKey",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub api_key: String,
-    #[serde(default, rename = "newestFirst")]
+    #[serde(
+        default,
+        rename = "newestFirst",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub newest_first: bool,
-    #[serde(default, rename = "configurationGeneration")]
+    #[serde(
+        default,
+        rename = "configurationGeneration",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub configuration_generation: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default_vec")]
     pub locales: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub key: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub fallback: String,
-    #[serde(default, rename = "oneFallback")]
+    #[serde(
+        default,
+        rename = "oneFallback",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub one_fallback: String,
-    #[serde(default, rename = "otherFallback")]
+    #[serde(
+        default,
+        rename = "otherFallback",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub other_fallback: String,
-    #[serde(default)]
-    pub count: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub count: i64,
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub selection: Selection,
-    #[serde(default, rename = "entryID")]
+    #[serde(
+        default,
+        rename = "entryID",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub entry_id: i64,
-    #[serde(default, rename = "entryIDs")]
+    #[serde(
+        default,
+        rename = "entryIDs",
+        deserialize_with = "deserialize_null_default_vec"
+    )]
     pub entry_ids: Vec<i64>,
-    #[serde(default, rename = "retainEntryIDs")]
+    #[serde(
+        default,
+        rename = "retainEntryIDs",
+        deserialize_with = "deserialize_null_default_vec"
+    )]
     pub retain_entry_ids: Vec<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub read: bool,
-    #[serde(default, rename = "mutationSource")]
+    #[serde(
+        default,
+        rename = "mutationSource",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub mutation_source: String,
-    #[serde(default, rename = "mutationID")]
+    #[serde(
+        default,
+        rename = "mutationID",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub mutation_id: String,
     /// Compatibility field ignored by the Go core and not used in Phase 3.
-    #[serde(default, rename = "currentStarred")]
+    #[serde(
+        default,
+        rename = "currentStarred",
+        deserialize_with = "deserialize_null_default"
+    )]
     #[allow(dead_code)]
     pub current_starred: bool,
-    #[serde(default, rename = "desiredStarred")]
+    #[serde(
+        default,
+        rename = "desiredStarred",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub desired_starred: bool,
-    #[serde(default, rename = "feedID")]
+    #[serde(
+        default,
+        rename = "feedID",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub feed_id: i64,
-    #[serde(default, rename = "feedName")]
+    #[serde(
+        default,
+        rename = "feedName",
+        deserialize_with = "deserialize_null_default"
+    )]
     pub feed_name: String,
 }
 
@@ -200,7 +391,7 @@ pub enum Operation {
         key: String,
         one_fallback: String,
         other_fallback: String,
-        count: i32,
+        count: i64,
     },
 }
 
@@ -320,6 +511,56 @@ mod tests {
         assert_eq!(req.operation, "");
         let err = req.into_operation().unwrap_err();
         assert_eq!(err, r#"unsupported operation """#);
+    }
+
+    #[test]
+    fn explicit_null_fields_use_go_zero_values() {
+        let req: Request = serde_json::from_str(
+            r#"{"operation":"localize","locales":null,"key":null,"fallback":null,"selection":{"kind":null,"id":null,"unreadOnly":null},"entryIDs":null,"count":null}"#,
+        )
+        .unwrap();
+        assert_eq!(req.locales, Vec::<String>::new());
+        assert_eq!(req.key, "");
+        assert_eq!(req.fallback, "");
+        assert_eq!(req.selection, Selection::default());
+        assert_eq!(req.entry_ids, Vec::<i64>::new());
+        assert_eq!(req.count, 0);
+    }
+
+    #[test]
+    fn public_parser_matches_go_case_insensitive_fields_and_null_elements() {
+        let req = parse_request(
+            r#"{"OPERATION":"set_read","ENTRYIDS":[null,2],"SELECTION":{"KIND":"feed","ID":7,"UNREADONLY":true},"LOCALES":[null,"de-DE"]}"#,
+        )
+        .unwrap();
+        assert_eq!(req.operation, "set_read");
+        assert_eq!(req.entry_ids, vec![0, 2]);
+        assert_eq!(req.locales, vec!["", "de-DE"]);
+        assert_eq!(
+            req.selection,
+            Selection {
+                kind: "feed".to_string(),
+                id: 7,
+                unread_only: true,
+            }
+        );
+    }
+
+    #[test]
+    fn public_parser_uses_last_case_equivalent_key() {
+        let req = parse_request(
+            r#"{"operation":"unknown","OPERATION":"localize","selection":{"kind":"all","KIND":"feed","id":7}}"#,
+        )
+        .unwrap();
+        assert_eq!(req.operation, "localize");
+        assert_eq!(req.selection.kind, "feed");
+    }
+
+    #[test]
+    fn plural_count_accepts_go_64_bit_int_range() {
+        let request: Request =
+            serde_json::from_str(r#"{"operation":"localize_plural","count":3000000000}"#).unwrap();
+        assert_eq!(request.count, 3_000_000_000);
     }
 
     #[test]

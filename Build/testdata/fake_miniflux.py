@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 BASE_TS = "2026-08-22T10:00:00Z"
 
 def entry(eid, status="unread", starred=False):
+    category_id = 5 if eid % 10 == 0 else 2
+    category_title = "News" if category_id == 5 else "Tech"
     return {
         "id": eid,
         "feed_id": 3 if eid % 10 else 4,
@@ -21,7 +23,7 @@ def entry(eid, status="unread", starred=False):
         "feed": {
             "id": 3 if eid % 10 else 4,
             "title": "Alpha Feed" if eid % 10 else "Beta Feed",
-            "category": {"id": 2, "title": "Tech"},
+            "category": {"id": category_id, "title": category_title},
         },
     }
 
@@ -69,11 +71,18 @@ class Handler(BaseHTTPRequestHandler):
             from urllib.parse import parse_qs
             params = parse_qs(query)
             if params.get("starred") == ["1"]:
-                out = paged(sorted(STARRED), query)
+                ids = sorted(STARRED)
             elif params.get("status") == ["unread"]:
-                out = paged(UNREAD_IDS, query)
+                ids = UNREAD_IDS
             else:
-                out = paged(ALL_IDS, query)
+                ids = ALL_IDS
+            if "category_id" in params:
+                category_id = int(params["category_id"][0])
+                ids = [eid for eid in ids if (5 if eid % 10 == 0 else 2) == category_id]
+            if "feed_id" in params:
+                feed_id = int(params["feed_id"][0])
+                ids = [eid for eid in ids if (3 if eid % 10 else 4) == feed_id]
+            out = paged(ids, query)
         else:
             self.send_response(404); self.end_headers(); return
         self.send_response(200)

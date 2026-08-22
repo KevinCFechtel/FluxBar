@@ -1,18 +1,15 @@
 //! Typed operation dispatcher.
 //!
 //! The dispatcher is the boundary between the JSON compatibility adapter and
-//! future domain implementations. In Phase 3 every supported operation is
-//! routed to a handler that returns a deterministic "not implemented"
-//! response. Later phases can replace individual handlers with real behavior
-//! without changing the FFI or transport layers.
+//! the runtime/domain implementations. Every supported operation routes through
+//! this typed boundary without exposing JSON details to domain code.
 
 use crate::runtime::AppRuntime;
 use crate::transport::{Operation, Response};
 
 /// Dispatches a typed operation to its handler.
 ///
-/// Phase 8 implements configuration, local/remote snapshots, and the complete
-/// read/star/pending/Undo mutation surface. Supporting services remain stubs.
+/// All 11 current public operations have real handlers.
 pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
     match operation {
         Operation::Configure {
@@ -131,7 +128,7 @@ mod handlers {
         key: &str,
         one_fallback: &str,
         other_fallback: &str,
-        count: i32,
+        count: i64,
     ) -> Response {
         let localizer = crate::localization::Localizer::new(locales);
         Response {

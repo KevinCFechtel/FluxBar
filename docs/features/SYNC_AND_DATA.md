@@ -19,7 +19,8 @@ During the staged Rust migration, Go remains the production/reference owner.
 The experimental Rust core now reproduces local snapshots, Miniflux remote
 behavior, refresh/reconciliation, effective versus remote state, durable
 pending read/star mutations, successful-prefix flush, Undo/discard, the
-10-second automatic-read delay, and article preview/image extraction.
+10-second automatic-read delay, article preview/image extraction, localization,
+and feed-icon processing/cache.
 Differential tests compare JSON, database state, pending/Undo rows, fake
 remote requests, and processed article fields. Automated Rust tests use
 temporary databases and fake credentials and never open the user's production
@@ -150,12 +151,11 @@ Implemented article-thumbnail behavior:
 -   disposable
 -   safe to clear without losing application state
 
-Feed icons currently use a separate in-memory Go-core cache, including
-regular and dark variants, and deduplicate concurrent loads. During the
-Rust migration this behavior is a compatibility requirement; the cache
-implementation language may change without changing client-visible
-semantics. Feed-icon bytes are not included in browse snapshots and are
-not currently persisted to disk.
+Feed icons use a separate in-memory core cache, including regular and dark
+variants, and deduplicate concurrent loads. Both implementations retry failed
+or malformed loads rather than caching failure. Feed-icon bytes are not
+included in browse snapshots and are not persisted to disk. The caches remain
+unbounded process-local behavior inherited from Go.
 
 An explicit cache-clear UI and an application-controlled age/LRU policy
 remain open; the system `URLCache` and `NSCache` currently manage
