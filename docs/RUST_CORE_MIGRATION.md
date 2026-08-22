@@ -109,20 +109,30 @@ Go remains default.
 
 ## Phase 2 --- Parallel build selection
 
-Add an isolated Rust-core build path.
+Add an isolated Rust-core build path that produces the same Xcode-facing
+artifact contract as the Go core (`libfluxcore.a` / `libfluxcore.h`).
 
 Desired developer UX:
 
 ``` sh
-FLUX_CORE=go ./Build/build-go.sh
-FLUX_CORE=rust ./Build/build-go.sh  # future Rust path
+./Build/build.sh                  # default: Go core
+FLUX_CORE=go ./Build/build.sh     # explicit Go core
+FLUX_CORE=rust ./Build/build.sh   # experimental Rust core
 ```
 
-The exact implementation should follow the repository's current build
-layout. Go remains default initially.
+`Build/build.sh` is a thin dispatcher that delegates to
+`Build/build-go.sh` or `Build/build-rust.sh`. Both scripts invoke Xcode
+with the same native target; the Xcode build phase calls
+`Build/build-core.sh`, which dispatches to `Build/build-go-core.sh` or
+`Build/build-rust-core.sh` based on `FLUX_CORE`.
 
-Exit gate: both variants build without source edits and release behavior
-has not silently changed.
+Go remains the default and production/reference core. The Rust core is
+still a skeleton: it links and returns deterministic "not implemented"
+responses, but it does not implement SQLite, Miniflux, snapshots, icons,
+localization, or mutations yet.
+
+Exit gate: both variants build without Swift source edits and release
+behavior has not silently changed.
 
 ## Phase 3 --- Compatibility API
 

@@ -12,12 +12,23 @@ These channels can coexist.
 
 ## Current Native Build
 
-`Build/build-go.sh` builds the Go-backed SwiftUI/AppKit target through
-Xcode. It compiles and links the Go core from `go-core/` as a C archive,
-copies `FluxBar.app` to `dist`, and applies an ad-hoc signature for local
-execution. The current top-level build is architecture-specific even
-though the lower-level Go-core build script can combine multiple
-architectures.
+`Build/build.sh` is the default developer build entry point. It dispatches
+to `Build/build-go.sh` (default) or `Build/build-rust.sh` based on the
+`FLUX_CORE` environment variable. Both scripts build the same SwiftUI/AppKit
+target through Xcode; the Xcode build phase calls `Build/build-core.sh`,
+which produces the implementation-neutral core artifacts
+`libfluxcore.a` / `libfluxcore.h` from either the Go or Rust core.
+
+`Build/build-go.sh` compiles and links the Go core from `go-core/` as a
+C archive, copies `FluxBar.app` to `dist`, and applies an ad-hoc signature
+for local execution. The current top-level build is architecture-specific
+even though the lower-level `Build/build-go-core.sh` script can combine
+multiple architectures.
+
+`Build/build-rust.sh` builds the same native application against the Rust
+core in `rust-core/`. The Rust core is experimental and currently a
+skeleton; it is useful for compatibility testing and linker validation,
+not for daily use.
 
 `Build/release-go.sh` implements the direct-distribution path for the
 Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It
@@ -96,6 +107,10 @@ and CI details should be added only when established in the repository.
 During the Go-to-Rust compatibility migration, the established
 production release path remains Go-backed unless a migration phase
 explicitly changes the default.
+
+`Build/build.sh` is a developer build selector; it is not a release
+script. `Build/release-go.sh` remains the current production release
+path and continues to call `Build/build-go.sh`.
 
 Rust build artifacts may be produced for development and compatibility
 testing, but adding Rust must not silently alter signing, notarization,

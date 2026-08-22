@@ -23,7 +23,7 @@ if [[ "${APP_DIR}" != "${REPOSITORY_DIR}/dist/FluxBar.app" ]]; then
 fi
 
 rm -rf -- "${APP_DIR}"
-FLUX_CORE=go xcodebuild \
+FLUX_CORE=rust xcodebuild \
   -project "${REPOSITORY_DIR}/macos/FluxBar.xcodeproj" \
   -scheme FluxBar \
   -configuration "${CONFIGURATION}" \
@@ -41,4 +41,4 @@ if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign - "${APP_DIR}"
 fi
 
-echo "FluxBar-App erstellt: ${APP_DIR}"
+echo "FluxBar-App (Rust-Kern) erstellt: ${APP_DIR}"

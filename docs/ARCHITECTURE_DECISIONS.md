@@ -244,8 +244,11 @@ macOS native client
 ```
 
 The Go implementation remains the reference until Rust compatibility is
-proven. Language migration must not be combined with unrelated feature,
-database, UI, or product redesign.
+proven. During the parallel period the developer build supports both
+cores through `FLUX_CORE=go` (default) and `FLUX_CORE=rust`, while
+Xcode consumes the same `libfluxcore.a` / `libfluxcore.h` artifact
+contract regardless of implementation. Language migration must not be
+combined with unrelated feature, database, UI, or product redesign.
 
 After Rust is stable, a typed binding layer such as UniFFI may be
 evaluated separately. That later adapter decision must not leak FFI

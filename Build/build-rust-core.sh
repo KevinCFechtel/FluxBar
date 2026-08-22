@@ -4,13 +4,64 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${1:?output directory required}"
+shift
+ARCHS=("$@")
+
+if [[ "${#ARCHS[@]}" -eq 0 ]]; then
+  echo "Mindestens eine Architektur ist erforderlich." >&2
+  exit 1
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-cargo build --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" --release
+# Ensure the requested Rust targets are available. We install lazily so a
+# developer on Apple Silicon can build arm64-only without needing x86_64,
+# while CI or Intel developers can still produce universal archives.
+ensure_target() {
+  local target="$1"
+  if ! rustup target list --installed | grep -qx "${target}"; then
+    echo "Installiere Rust-Ziel: ${target}" >&2
+    rustup target add "${target}"
+  fi
+}
 
-ARTIFACT="${REPOSITORY_DIR}/rust-core/target/release/librustcore.a"
-cp "${ARTIFACT}" "${OUTPUT_DIR}/librustcore.a"
+archives=()
+for arch in "${ARCHS[@]}"; do
+  case "${arch}" in
+    arm64)
+      target="aarch64-apple-darwin"
+      ;;
+    x86_64)
+      target="x86_64-apple-darwin"
+      ;;
+    *)
+      echo "Nicht unterstützte macOS-Architektur: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+
+  ensure_target "${target}"
+
+  arch_dir="${OUTPUT_DIR}/${arch}"
+  mkdir -p "${arch_dir}"
+
+  cargo build \
+    --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
+    --target "${target}" \
+    --release
+
+  cp "${REPOSITORY_DIR}/rust-core/target/${target}/release/libfluxcore.a" \
+    "${arch_dir}/libfluxcore.a"
+  archives+=("${arch_dir}/libfluxcore.a")
+done
+
+if [[ "${#archives[@]}" -eq 1 ]]; then
+  cp "${archives[0]}" "${OUTPUT_DIR}/libfluxcore.a"
+else
+  xcrun lipo -create "${archives[@]}" -output "${OUTPUT_DIR}/libfluxcore.a"
+fi
+
+cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/libfluxcore.h"
 
 # Smoke-test the produced static library by compiling and running a tiny C
 # caller. This proves the expected C symbols are exported and callable.
@@ -45,7 +96,7 @@ int main(void) {
 }
 EOF
 
-cc -o "${SMOKE_DIR}/smoke" "${SMOKE_DIR}/smoke.c" "${OUTPUT_DIR}/librustcore.a"
+cc -o "${SMOKE_DIR}/smoke" "${SMOKE_DIR}/smoke.c" "${OUTPUT_DIR}/libfluxcore.a"
 "${SMOKE_DIR}/smoke"
 
-echo "Rust core static library: ${OUTPUT_DIR}/librustcore.a"
+echo "Rust core static library: ${OUTPUT_DIR}/libfluxcore.a"

@@ -26,12 +26,22 @@ The project is released under the BSD 3-Clause License. Contributions, bug repor
 
 ## Build the App
 
+The default developer build uses the Go core, which remains the production/reference implementation:
+
 ```bash
-./Build/build-go.sh
-open dist/FluxBar.app
+./Build/build.sh              # default: Go core
+FLUX_CORE=go ./Build/build.sh # explicit Go core
 ```
 
-The build script creates `dist/FluxBar.app`. On first launch, enter the Miniflux URL and API key through “Settings…” in the menu. Credentials do not need to be stored in the source code or any build files.
+An experimental Rust core build is available for development and compatibility testing:
+
+```bash
+FLUX_CORE=rust ./Build/build.sh
+```
+
+The Rust core is intentionally still a skeleton in this migration phase; it will launch and link, but it does not implement Miniflux sync, SQLite, snapshots, or other business functionality yet.
+
+Both build paths produce `dist/FluxBar.app`. On first launch, enter the Miniflux URL and API key through “Settings…” in the menu. Credentials do not need to be stored in the source code or any build files.
 
 ## Create a Release
 
@@ -47,10 +57,20 @@ cp Build/.env.example Build/.env
 
 ## Development
 
+Go core:
+
 ```bash
 cd go-core
 go test ./...
 go vet ./...
+```
+
+Rust core:
+
+```bash
+cargo fmt --manifest-path rust-core/Cargo.toml --check
+cargo check --manifest-path rust-core/Cargo.toml
+cargo test --manifest-path rust-core/Cargo.toml
 ```
 
 Changes should be covered by appropriate tests. Pull requests should focus on a clearly described problem or feature.

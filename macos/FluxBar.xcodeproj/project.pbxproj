@@ -126,7 +126,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 900000000000000000000002 /* Build configuration list for PBXNativeTarget "FluxBar" */;
 			buildPhases = (
-				600000000000000000000001 /* Build Go Core */,
+				600000000000000000000001 /* Build Core */,
 				300000000000000000000002 /* Sources */,
 				300000000000000000000001 /* Frameworks */,
 				300000000000000000000003 /* Resources */,
@@ -188,20 +188,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		600000000000000000000001 /* Build Go Core */ = {
+		600000000000000000000001 /* Build Core */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = ();
 			inputPaths = ();
-			name = "Build Go Core";
+			name = "Build Core";
 			outputPaths = (
-				"$(GO_CORE_DIR)/libfluxcore.a",
-				"$(GO_CORE_DIR)/libfluxcore.h",
+				"$(FLUX_CORE_DIR)/libfluxcore.a",
+				"$(FLUX_CORE_DIR)/libfluxcore.h",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\n\"${SRCROOT}/../Build/build-go-core.sh\" \"${GO_CORE_DIR}\" ${ARCHS}\n";
+			shellScript = "set -euo pipefail\n\"${SRCROOT}/../Build/build-core.sh\" \"${FLUX_CORE_DIR}\" ${ARCHS}\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -259,14 +259,14 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				GO_CORE_DIR = "$(DERIVED_FILE_DIR)/GoCore";
-				HEADER_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				FLUX_CORE_DIR = "$(DERIVED_FILE_DIR)/FluxCore";
+				HEADER_SEARCH_PATHS = ("$(inherited)", "$(FLUX_CORE_DIR)");
 				INFOPLIST_FILE = FluxBar/Info.plist;
-				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(FLUX_CORE_DIR)");
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.0.0;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = ("$(inherited)", "$(GO_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
+				OTHER_LDFLAGS = ("$(inherited)", "$(FLUX_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBar;
 				PRODUCT_NAME = FluxBar;
 				SWIFT_OBJC_BRIDGING_HEADER = "FluxBar/FluxBar-Bridging-Header.h";
@@ -282,14 +282,14 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
-				GO_CORE_DIR = "$(DERIVED_FILE_DIR)/GoCore";
-				HEADER_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				FLUX_CORE_DIR = "$(DERIVED_FILE_DIR)/FluxCore";
+				HEADER_SEARCH_PATHS = ("$(inherited)", "$(FLUX_CORE_DIR)");
 				INFOPLIST_FILE = FluxBar/Info.plist;
-				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(GO_CORE_DIR)");
+				LIBRARY_SEARCH_PATHS = ("$(inherited)", "$(FLUX_CORE_DIR)");
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 2.0.0;
 				ONLY_ACTIVE_ARCH = NO;
-				OTHER_LDFLAGS = ("$(inherited)", "$(GO_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
+				OTHER_LDFLAGS = ("$(inherited)", "$(FLUX_CORE_DIR)/libfluxcore.a", "-framework", CoreFoundation, "-framework", Security, "-lresolv");
 				PRODUCT_BUNDLE_IDENTIFIER = dev.kevincfechtel.FluxBar;
 				PRODUCT_NAME = FluxBar;
 				SWIFT_OBJC_BRIDGING_HEADER = "FluxBar/FluxBar-Bridging-Header.h";

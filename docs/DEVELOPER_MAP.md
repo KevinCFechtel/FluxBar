@@ -144,21 +144,27 @@ The intended migration keeps the native macOS architecture stable while
 a Rust core is developed beside the Go core.
 
 ``` text
-                    Native macOS client
-                           │
-                    stable C/JSON bridge
-                     ┌─────┴─────┐
-                     │           │
-                  Go core     Rust core
-                 reference    candidate
-                     │           │
-                     └─────┬─────┘
-                           │
-                equivalent product semantics
+                     Native macOS client
+                            │
+                     stable C/JSON bridge
+                      ┌─────┴─────┐
+                      │           │
+                   Go core     Rust core
+                  reference    candidate
+                      │           │
+                      └─────┬─────┘
+                            │
+                 equivalent product semantics
 ```
 
 The Rust implementation is not a second product architecture. It should
 eventually replace Go behind the same product boundary.
+
+The Xcode target links an implementation-neutral artifact contract
+(`libfluxcore.a` / `libfluxcore.h`) produced by a build-phase script.
+The script dispatches to the Go or Rust core based on the `FLUX_CORE`
+environment variable. `FLUX_CORE=go` (or unset) is the default;
+`FLUX_CORE=rust` is experimental and incomplete.
 
 Initial migration constraints:
 
