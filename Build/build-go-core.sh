@@ -32,7 +32,7 @@ for arch in "${ARCHS[@]}"; do
   arch_dir="${OUTPUT_DIR}/${arch}"
   mkdir -p "${arch_dir}"
   (
-    cd "${REPOSITORY_DIR}"
+    cd "${REPOSITORY_DIR}/go-core"
     env \
       CGO_ENABLED=1 \
       GOOS=darwin \

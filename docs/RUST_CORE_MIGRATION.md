@@ -114,8 +114,8 @@ Add an isolated Rust-core build path.
 Desired developer UX:
 
 ``` sh
-FLUX_CORE=go ./Build/build.sh
-FLUX_CORE=rust ./Build/build.sh
+FLUX_CORE=go ./Build/build-go.sh
+FLUX_CORE=rust ./Build/build-go.sh  # future Rust path
 ```
 
 The exact implementation should follow the repository's current build

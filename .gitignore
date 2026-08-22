@@ -11,6 +11,9 @@
 /dist/
 /.build/
 
+# Rust core build artifacts
+/rust-core/target/
+
 # Test binary, built with `go test -c`
 *.test
 

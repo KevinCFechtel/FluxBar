@@ -27,7 +27,7 @@ The project is released under the BSD 3-Clause License. Contributions, bug repor
 ## Build the App
 
 ```bash
-./Build/build.sh
+./Build/build-go.sh
 open dist/FluxBar.app
 ```
 
@@ -40,7 +40,7 @@ A signed and notarized release requires an Apple Developer ID and a `notarytool`
 ```bash
 xcrun notarytool store-credentials FluxBar-notary
 cp Build/.env.example Build/.env
-./Build/release.sh
+./Build/release-go.sh
 ```
 
 `Build/.env` is ignored by Git. The completed archive is written to `dist/release/`.
@@ -48,6 +48,7 @@ cp Build/.env.example Build/.env
 ## Development
 
 ```bash
+cd go-core
 go test ./...
 go vet ./...
 ```

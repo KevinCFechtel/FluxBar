@@ -76,7 +76,7 @@ The native macOS layer should not duplicate business rules merely for UI
 convenience.
 
 Application localization is currently shared Go-core behavior.
-Translation catalogs live under `internal/localization/translations` and
+Translation catalogs live under `go-core/internal/localization/translations` and
 are exposed to native platform interfaces through the platform bridge.
 Native interfaces provide their ordered locale preferences and do not
 maintain a duplicate application catalog.

@@ -62,7 +62,7 @@ Shared application strings use `github.com/nicksnyder/go-i18n/v2`
 directly. Localization must not depend on Fyne or another UI framework.
 
 JSON catalogs use the `go-i18n` resource format and live under
-`internal/localization/translations`. English is the default catalog and
+`go-core/internal/localization/translations`. English is the default catalog and
 fallback locale. Native clients pass ordered BCP-47 locale preferences
 to the Go localization package and obtain localized strings through
 their native platform bridge. Platform-required metadata may use native

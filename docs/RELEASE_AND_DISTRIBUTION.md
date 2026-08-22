@@ -12,17 +12,19 @@ These channels can coexist.
 
 ## Current Native Build
 
-`Build/build.sh` builds the SwiftUI/AppKit target through Xcode,
-compiles and links the Go core as a C archive, copies `FluxBar.app` to
-`dist`, and applies an ad-hoc signature for local execution. The current
-top-level build is architecture-specific even though the lower-level
-Go-core build script can combine multiple architectures.
+`Build/build-go.sh` builds the Go-backed SwiftUI/AppKit target through
+Xcode. It compiles and links the Go core from `go-core/` as a C archive,
+copies `FluxBar.app` to `dist`, and applies an ad-hoc signature for local
+execution. The current top-level build is architecture-specific even
+though the lower-level Go-core build script can combine multiple
+architectures.
 
-`Build/release.sh` implements the direct-distribution path as a
-Developer ID-signed, hardened, notarized ZIP. It verifies the signature,
-notarization ticket, Gatekeeper assessment, and re-extracted final
-artifact. DMG packaging, universal release artifacts, Mac App Store
-packaging, Homebrew publication, and release CI remain future work.
+`Build/release-go.sh` implements the direct-distribution path for the
+Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It
+verifies the signature, notarization ticket, Gatekeeper assessment, and
+re-extracted final artifact. DMG packaging, universal release artifacts,
+Mac App Store packaging, Homebrew publication, and release CI remain
+future work.
 
 ## Identity and Compatibility
 

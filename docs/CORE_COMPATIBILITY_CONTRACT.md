@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This is the migration contract between the current Go core and the
-parallel Rust implementation.
+This is the migration contract between the current Go core and the parallel
+Rust implementation.
 
 The repository's existing Go implementation is authoritative where this
 document is incomplete. Update this document from inspected code before
@@ -11,9 +11,11 @@ porting an operation. Do not infer missing behavior.
 
 This contract supplements, rather than replaces:
 
--   `ARCHITECTURE_DECISIONS.md`
--   `DEVELOPER_MAP.md`
--   `features/SYNC_AND_DATA.md`
+-   ARCHITECTURE_DECISIONS.md
+-   DEVELOPER_MAP.md
+-   features/SYNC_AND_DATA.md
+-   RUST_CORE_MIGRATION.md
+-   RUST_CORE_TESTING.md
 
 ## Current native boundary
 
@@ -24,25 +26,42 @@ core-allocated response strings.
 The initial Rust core must preserve the callable behavior of:
 
 ``` c
-FluxCoreRequest(...)
-FluxCoreFree(...)
+extern char* FluxCoreRequest(char* request);
+extern void FluxCoreFree(char* value);
 ```
 
-The exact generated C signature and nullability must be copied from the
-current Go export/header during the contract audit.
+These signatures are taken from the C header produced by
+go-core/cmd/fluxcore/main.go (go build -buildmode=c-archive). The pointer types
+are mutable char* even though the request buffer is not modified by the
+core.
+
+The Swift caller (macos/FluxBar/GoCore.swift) passes a UTF-8 C string via
+json.withCString, decodes the returned pointer with String(cString:), and
+always calls FluxCoreFree in a defer.
 
 ## Memory ownership
 
-The migration must explicitly verify and document:
+Facts taken from go-core/cmd/fluxcore/main.go:
 
-1.  ownership of the request buffer;
-2.  whether the core retains any input pointer;
-3.  allocation ownership of the response;
-4.  the required matching free operation;
-5.  null-pointer behavior;
-6.  invalid UTF-8/C-string behavior where relevant.
+1.  **Request buffer ownership:** the native caller owns the request buffer.
+    The core reads it synchronously and does not retain the pointer.
+2.  **Core retains no input pointer:** C.GoString copies the C string into
+    Go memory; the input *C.char is not kept.
+3.  **Response allocation ownership:** every successful and error response
+    is allocated by C.CString from the C heap in the core's address space.
+4.  **Required matching free operation:** the caller must release the
+    response pointer by calling FluxCoreFree, which executes C.free.
+5.  **Null-pointer behavior:**
+    -   FluxCoreRequest(nil) returns a core-owned string containing
+        {"ok":false,"error":"null request"}.
+    -   FluxCoreFree(nil) is a no-op.
+6.  **Invalid UTF-8 / non-C-string behavior:** not explicitly handled. The
+    Go implementation uses C.GoString, which expects a null-terminated
+    byte sequence. Rust must define and document its own behavior for
+    non-UTF-8 input; a safe choice is to treat it like malformed JSON and
+    return an invalid-request error.
 
-Rust `unsafe` code must remain confined to the FFI adapter and every
+Rust unsafe code must remain confined to the FFI adapter and every
 unsafe assumption must be documented.
 
 ## JSON compatibility
@@ -60,24 +79,550 @@ The Rust compatibility adapter must initially preserve:
 
 Rust-internal naming may differ using serialization attributes.
 
-## Known current bridge capabilities
+## Operation inventory
 
-Repository documentation currently states that the bridge supports:
+The dispatcher in go-core/internal/coreapi/api.go handles the following operations.
+All requests share a single JSON envelope (Request) and all responses share
+a single JSON envelope (Response). Unknown operations return an error of
+form unsupported operation "op".
 
--   configuration;
--   refresh;
--   read/star mutations;
--   feed icons;
--   localization;
--   versioned browse snapshots (current documented schema version: 1).
+Operations that require an engine (i.e. a successful prior configure)
+return Miniflux is not configured when no engine exists:
+local_snapshot, refresh, set_read, set_starred, undo_read,
+discard_undo, flush_pending, feed_icon.
 
-The exact operation inventory and request/response schemas must be
-audited from `internal/coreapi` before implementation. Do not treat this
-summary as exhaustive.
+### Common request envelope
+
+go-core/internal/coreapi/api.go defines Request with these JSON fields:
+
+-   operation (string, required)
+-   server (string)
+-   apiKey (string)
+-   newestFirst (bool)
+-   configurationGeneration (int64)
+-   locales (array of strings)
+-   key (string)
+-   fallback (string)
+-   oneFallback (string)
+-   otherFallback (string)
+-   count (int)
+-   selection (object: kind, id, unreadOnly)
+-   entryID (int64)
+-   entryIDs (array of int64)
+-   retainEntryIDs (array of int64)
+-   read (bool)
+-   mutationSource (string)
+-   mutationID (string)
+-   currentStarred (bool)
+-   desiredStarred (bool)
+-   feedID (int64)
+-   feedName (string)
+
+currentStarred is present in the envelope but is not used by the Go
+dispatcher. The Swift client does not send it for set_starred; the core
+re-reads remote state before deciding whether to toggle.
+
+### Common response envelope
+
+go-core/internal/coreapi/api.go defines Response with these JSON fields:
+
+-   ok (bool, always present)
+-   error (string, omitted when empty)
+-   text (string, omitted when empty)
+-   snapshot (object)
+-   icon (object with regular and dark byte arrays)
+-   receipt (object with id and count)
+
+### configure
+
+**Input fields**
+
+-   operation: "configure"
+-   server: complete HTTP or HTTPS URL
+-   apiKey: non-empty API key
+-   newestFirst: publication sort order (default false / oldest first)
+-   configurationGeneration: monotonic configuration generation
+-   locales: ordered BCP-47 locale preferences
+
+Validation:
+
+-   server is trimmed, trailing slashes are removed, and the result must
+    parse as http or https with a non-empty host.
+-   apiKey is trimmed and must be non-empty after trimming.
+-   configurationGeneration below the previously stored generation causes
+    the configuration to be ignored (stale-configuration race protection).
+-   Validation error messages are localized using the supplied locales.
+
+**Success response**
+
+ok set to true.
+
+**Failure response**
+
+ok set to false and error contains a localized validation message.
+
+**Timeout/deadline:** no explicit timeout is applied.
+
+**Local side effects:**
+
+-   Lazily creates the SQLite store under the user config directory at
+    UserConfigDir/FluxBar/inbox.sqlite3.
+-   Ensures the account row exists via EnsureAccount.
+-   Creates an inbox.Service with a Miniflux remote client if the
+    generation is current.
+
+**SQLite effects:** INSERT OR REPLACE into accounts(id, server) using the
+account ID derived as SHA256(server + NUL byte + apiKey), hex-encoded.
+
+**Remote effects:** none during configure.
+
+**Partial-success behavior:** none.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "configure"
+-   go-core/internal/coreapi/api_test.go TestConfigureValidatesCredentials
+
+### local_snapshot
+
+**Input fields**
+
+-   operation: "local_snapshot"
+-   selection: ArticleSelection-like object
+-   retainEntryIDs: array of entry IDs to keep visible
+
+**Success response**
+
+ok true and snapshot present. The snapshot version is always 1.
+
+**Failure response**
+
+ok false with error "Miniflux is not configured" or a database error.
+
+**Timeout/deadline:** 5 seconds.
+
+**Local side effects:** reads SQLite only.
+
+**SQLite effects:** queries entries, categories, feeds, selection_totals,
+and pending_mutations for the configured account.
+
+**Remote effects:** none.
+
+**Partial-success behavior:** none.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "local_snapshot"
+-   go-core/internal/inbox/store.go Snapshot
+-   go-core/internal/inbox/store_test.go
+
+### refresh
+
+**Input fields**
+
+-   operation: "refresh"
+-   selection: ArticleSelection-like object
+-   retainEntryIDs: array of entry IDs to keep visible
+
+**Success response**
+
+ok true and snapshot present. Snapshot version is always 1.
+
+**Failure response**
+
+ok false and error present.
+
+Partial success: ok true, error present, and snapshot present. This occurs
+when remote sync fails but a usable local snapshot with version greater
+than 0 can still be produced.
+
+**Timeout/deadline:** 45 seconds.
+
+**Local side effects:** flushes pending mutations, applies the remote
+snapshot if available, and returns the resulting local snapshot.
+
+**SQLite effects:** may update accounts, categories, feeds, entries,
+selection_totals, and remove acknowledged pending_mutations.
+
+**Remote effects:** fetches counters, categories, feeds, and paginated
+entries via Miniflux. Remote selection uses ascending entry-ID cursor
+pagination in 200-entry pages. A failed, duplicated, reordered, or
+count-inconsistent page causes the whole refresh to fail while leaving the
+last local snapshot intact.
+
+**Partial-success behavior:** yes; see above.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "refresh"
+-   go-core/internal/inbox/service.go Sync
+-   go-core/internal/miniflux/service.go Browse, fetchCompleteSelection
+-   go-core/internal/inbox/service_test.go TestSyncWritesAndRetainsLocalSnapshotOffline
+
+### set_read
+
+**Input fields**
+
+-   operation: "set_read"
+-   selection: ArticleSelection-like object
+-   entryID: single entry ID (fallback when entryIDs is empty)
+-   entryIDs: array of entry IDs to mutate
+-   retainEntryIDs: array of entry IDs to keep visible
+-   read: desired read state
+-   mutationSource: "automatic" for scrollover reads, otherwise manual
+
+entryIDs is preferred. If entryIDs is empty and entryID is greater than
+zero, a single-ID list is used. At least one ID is required.
+
+**Success response**
+
+ok true and snapshot present. For undoable (automatic) batches that
+actually change at least one row, a receipt object is included with id and
+count fields. Manual reads and zero-count automatic batches do not include
+a receipt.
+
+**Failure response**
+
+ok false with an error message.
+
+**Timeout/deadline:** 5 seconds.
+
+**Local side effects:** updates local read state, creates or updates
+pending_mutations for read, and creates undo_batches / undo_items when
+undoable.
+
+**SQLite effects:** updates entries.status, inserts/updates
+pending_mutations, and inserts undo_batches/undo_items when undoable.
+
+**Remote effects:** none during the request; pending mutations are flushed
+asynchronously via ScheduleFlush (immediate for manual, 10-second delay for
+automatic).
+
+**Partial-success behavior:** none; the operation fails atomically if the
+database transaction cannot be committed.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "set_read"
+-   go-core/internal/inbox/service.go MarkRead
+-   go-core/internal/inbox/store.go SetRead
+-   go-core/internal/inbox/service_test.go TestSequentialAutomaticReadBatchesRetainEarlierRows
+
+### set_starred
+
+**Input fields**
+
+-   operation: "set_starred"
+-   selection: ArticleSelection-like object
+-   entryID: entry ID to mutate
+-   retainEntryIDs: array of entry IDs to keep visible
+-   desiredStarred: desired starred state
+
+**Success response**
+
+ok true and snapshot present.
+
+**Failure response**
+
+ok false with an error message.
+
+**Timeout/deadline:** 5 seconds.
+
+**Local side effects:** updates local starred state, creates or updates a
+pending mutation for starred, and schedules an immediate flush.
+
+**SQLite effects:** updates entries.starred and inserts/updates
+pending_mutations.
+
+**Remote effects:** none during the request; flush re-reads remote state
+before toggling to implement desired-state semantics.
+
+**Partial-success behavior:** none.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "set_starred"
+-   go-core/internal/inbox/service.go SetStarred
+-   go-core/internal/inbox/store.go SetStarred
+-   go-core/internal/inbox/service_test.go TestStarredReconciliationUsesRemoteDesiredState
+
+### undo_read
+
+**Input fields**
+
+-   operation: "undo_read"
+-   selection: ArticleSelection-like object
+-   mutationID: undo batch ID from a previous automatic read receipt
+-   retainEntryIDs: array of entry IDs to keep visible
+
+**Success response**
+
+ok true and snapshot present.
+
+**Failure response**
+
+ok false with an error message.
+
+**Timeout/deadline:** 5 seconds.
+
+**Local side effects:** restores the prior read state recorded in the undo
+batch, updates pending_mutations, and schedules an immediate flush.
+
+**SQLite effects:** updates entries.status, inserts/updates
+pending_mutations, and deletes the undo batch and its items.
+
+**Remote effects:** none during the request.
+
+**Partial-success behavior:** none.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "undo_read"
+-   go-core/internal/inbox/service.go Undo
+-   go-core/internal/inbox/store.go Undo
+
+### discard_undo
+
+**Input fields**
+
+-   operation: "discard_undo"
+-   mutationID: undo batch ID to discard
+
+**Success response**
+
+ok true.
+
+**Failure response**
+
+ok false with an error message.
+
+**Timeout/deadline:** 5 seconds.
+
+**Local side effects:** removes the undo batch and its items without
+mutating entry read state.
+
+**SQLite effects:** deletes from undo_batches and undo_items.
+
+**Remote effects:** none.
+
+**Partial-success behavior:** none.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "discard_undo"
+-   go-core/internal/inbox/service.go DiscardUndo
+-   go-core/internal/inbox/store.go DiscardUndo
+
+### flush_pending
+
+**Input fields**
+
+-   operation: "flush_pending"
+-   selection: ArticleSelection-like object
+-   retainEntryIDs: array of entry IDs to keep visible
+
+**Success response**
+
+ok true and snapshot present (from local_snapshot after flush).
+
+**Failure response**
+
+ok false with an error message.
+
+**Timeout/deadline:** 30 seconds.
+
+**Local side effects:** flushes all pending read/star mutations to
+Miniflux, acknowledges successful mutations, and returns a local snapshot.
+
+**SQLite effects:** updates entries.remote_status and entries.remote_starred,
+updates feeds.remote_unread_count, accounts.remote_starred_total, and
+selection_totals, and deletes acknowledged pending_mutations.
+
+**Remote effects:** sends SetReadBatch, EntryState, and ToggleStarred calls.
+
+**Partial-success behavior:** none; a single failed remote mutation aborts
+the flush and leaves all pending mutations in place.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "flush_pending"
+-   go-core/internal/inbox/service.go Flush, flushPending
+-   go-core/internal/inbox/store.go Acknowledge
+
+### feed_icon
+
+**Input fields**
+
+-   operation: "feed_icon"
+-   feedID: feed identifier
+-   feedName: feed name used for diagnostics
+
+**Success response**
+
+ok true and icon present with regular and dark byte arrays. Either array
+may be empty when no usable icon exists.
+
+**Failure response**
+
+ok false with "Miniflux is not configured" or a remote/cache error.
+
+**Timeout/deadline:** 15 seconds.
+
+**Local side effects:** reads from an in-memory icon cache and deduplicates
+concurrent loads for the same feed ID.
+
+**SQLite effects:** none; feed icons are not persisted.
+
+**Remote effects:** fetches the feed icon from Miniflux and normalizes it
+to a square PNG. A dark-mode variant is generated when the icon is dark
+and transparent.
+
+**Partial-success behavior:** a missing or unprocessable icon returns
+empty byte arrays rather than an error.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "feed_icon"
+-   go-core/internal/inbox/service.go FeedIcon
+-   go-core/internal/miniflux/service.go FeedIcon, icon
+-   go-core/internal/icons/icons.go
+
+### localize
+
+**Input fields**
+
+-   operation: "localize"
+-   locales: ordered BCP-47 preferences
+-   key: translation key
+-   fallback: fallback text
+
+**Success response**
+
+ok true and text present with the localized string.
+
+**Failure response**
+
+ok false if the localization bundle cannot be loaded.
+
+**Timeout/deadline:** none.
+
+**Local side effects:** loads the shared go-i18n bundle from embedded JSON
+files in go-core/internal/localization/translations.
+
+**SQLite effects:** none.
+
+**Remote effects:** none.
+
+**Partial-success behavior:** falls back to the supplied fallback text when
+no catalog match exists.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "localize"
+-   go-core/internal/localization/localization.go
+-   go-core/internal/coreapi/api_test.go TestLocalizeRequest
+
+### localize_plural
+
+**Input fields**
+
+-   operation: "localize_plural"
+-   locales: ordered BCP-47 preferences
+-   key: translation key
+-   oneFallback: fallback for count of one
+-   otherFallback: fallback for other counts
+-   count: integer count
+
+**Success response**
+
+ok true and text present with the pluralized localized string.
+
+**Failure response**
+
+ok false if the localization bundle cannot be loaded.
+
+**Timeout/deadline:** none.
+
+**Local side effects:** same as localize.
+
+**SQLite effects:** none.
+
+**Remote effects:** none.
+
+**Partial-success behavior:** falls back to oneFallback / otherFallback when
+no catalog match exists.
+
+**Reference implementation/tests:**
+
+-   go-core/internal/coreapi/api.go case "localize_plural"
+-   go-core/internal/localization/localization.go
+
+### Unknown operations
+
+Any operation value other than the ones above returns:
+
+-   ok: false
+-   error: unsupported operation "op"
+
+This is produced by the default branch of the dispatcher.
+
+## Snapshot schema
+
+model.BrowseSnapshot is serialized with these JSON fields:
+
+-   version (int): currently always 1
+-   selection (Selection: kind, id, unreadOnly)
+-   entries (array of Entry)
+-   categories (array of Category)
+-   total (int)
+-   unreadTotal (int)
+-   starredTotal (int)
+
+Entry fields:
+
+-   id (int64)
+-   title (string)
+-   url (string)
+-   commentsURL (string)
+-   feedID (int64)
+-   feedName (string)
+-   categoryID (int64)
+-   publishedAt (RFC3339Nano timestamp)
+-   preview (string)
+-   imageURL (string)
+-   status (string, "read" or "unread")
+-   starred (bool)
+-   icon (byte array)
+-   darkIcon (byte array)
+
+Category fields:
+
+-   id (int64)
+-   title (string)
+-   unreadCount (int)
+-   feeds (array of Feed)
+
+Feed fields:
+
+-   id (int64)
+-   title (string)
+-   categoryID (int64)
+-   unreadCount (int)
+
+Selection normalization (model.Selection.Normalized):
+
+-   "all" keeps id and unreadOnly.
+-   "unread" and "starred" drop id.
+-   "category" and "feed" require id greater than 0; otherwise fall back to
+    all with unreadOnly true.
+-   Any other kind falls back to all with unreadOnly true.
+
+The local snapshot limits returned entries to 200 rows, but total may
+reflect the full remote count for the selection.
 
 ## Data/sync compatibility that must be preserved
 
-From the current product documentation:
+Observed from the implementation:
 
 -   SQLite is account-scoped operational state.
 -   Local snapshots render before network synchronization.
@@ -85,8 +630,8 @@ From the current product documentation:
     transactionally.
 -   Pending changes survive connectivity failure.
 -   Rows marked read locally remain visible in the current unread
-    presentation until an explicit presentation refresh/context change.
--   Automatic-read changes use delayed flush semantics so Undo normally
+    presentation until an explicit presentation refresh or context change.
+-   Automatic-read changes use a 10-second delayed flush so Undo normally
     precedes remote delivery.
 -   Remote selection sync uses ascending entry-ID cursor pagination.
 -   Remote selections are fully paginated in 200-entry pages before
@@ -96,80 +641,84 @@ From the current product documentation:
 -   Failed/duplicated/reordered/count-inconsistent pages leave the last
     local snapshot intact.
 -   The local popover snapshot is capped at 200 rows.
--   Feed-icon bytes are not part of browse snapshots and are not
-    currently persisted to disk.
--   Browse snapshot compatibility is versioned; the documented current
-    schema version is 1.
+-   Feed-icon bytes are not part of browse snapshots and are not persisted
+    to disk.
+-   Browse snapshot compatibility is versioned; the current schema version
+    is 1.
 
-These are compatibility requirements unless code inspection shows the
-documentation is stale. If code and docs differ, report the discrepancy
-before deciding which behavior Rust should reproduce.
+## Error cases
 
-## Operation audit template
+Observed behavior for the audited error cases:
 
-Complete one section per actual operation discovered in the Go
-dispatcher.
+-   **Null request:** FluxCoreRequest(nil) returns
+    {"ok":false,"error":"null request"}.
+-   **Malformed JSON:** returns {"ok":false,"error":"invalid request: ..."}
+    with the JSON parser error appended.
+-   **Unknown operation:** returns unsupported operation "op".
+-   **Missing/invalid configuration:** configure returns a localized error
+    for invalid server URL or empty API key.
+-   **Not configured:** operations requiring an engine return
+    "Miniflux is not configured".
+-   **Authentication failure:** propagated from the Miniflux client as an
+    error string during refresh/flush.
+-   **Network failure:** refresh returns partial success with a local
+    snapshot when one exists; flush returns a hard error.
+-   **Timeout:** enforced by context.WithTimeout per operation.
+-   **Database failure:** returned as an error string, typically in German
+    because the Go code uses German error prefixes.
+-   **Malformed Miniflux response:** treated as a hard error by the
+    pagination verifier.
+-   **Partial sync failure:** flush stops at the first failed mutation;
+    refresh may return partial success with a local snapshot.
 
-### `<operation>`
+## Operation timeouts
 
-**Input fields**
+Deadlines observed in go-core/internal/coreapi/api.go:
 
-``` json
-{}
-```
+-   configure: none
+-   local_snapshot: 5 seconds
+-   refresh: 45 seconds
+-   set_read: 5 seconds
+-   set_starred: 5 seconds
+-   undo_read: 5 seconds
+-   discard_undo: 5 seconds
+-   flush_pending: 30 seconds
+-   feed_icon: 15 seconds
+-   localize / localize_plural: none
 
-**Success response**
+## Database initialization and location
 
-``` json
-{}
-```
+The SQLite store is opened lazily by Runtime.currentStore:
 
-**Failure response**
+-   Path: UserConfigDir/FluxBar/inbox.sqlite3
+-   Open flags include _busy_timeout=5000, _foreign_keys=on,
+    _journal_mode=WAL, _synchronous=NORMAL.
+-   MaxOpenConns is set to 1.
+-   The parent directory is created with 0700 permissions.
+-   The database file is chmod 0600 after opening.
+-   Schema is created via CREATE TABLE IF NOT EXISTS in
+    go-core/internal/inbox/store.go migrate().
 
-``` json
-{}
-```
+Tables created by the Go core:
 
-**Timeout/deadline**
+-   accounts (id, server, remote_starred_total, last_sync_at)
+-   categories (account_id, id, title)
+-   feeds (account_id, id, category_id, title, remote_unread_count)
+-   selection_totals (account_id, kind, selection_id, unread_only, total)
+-   entries (account_id, id, title, url, comments_url, feed_id, feed_name,
+    category_id, published_at, preview, image_url, remote_status,
+    remote_starred, status, starred)
+-   pending_mutations (account_id, entry_id, field, desired, revision,
+    updated_at)
+-   undo_batches (account_id, id, created_at)
+-   undo_items (account_id, batch_id, entry_id, prior_read)
 
--   TBD from Go implementation.
+Account ID derivation:
 
-**Local side effects**
+-   sha256(server + "\x00" + apiKey) rendered as lowercase hex.
 
--   TBD.
-
-**SQLite effects**
-
--   TBD.
-
-**Remote effects**
-
--   TBD.
-
-**Partial-success behavior**
-
--   TBD.
-
-**Reference implementation/tests**
-
--   TBD.
-
-## Error cases to audit
-
-At minimum inspect:
-
--   null request;
--   malformed JSON;
--   unknown operation;
--   missing/invalid configuration;
--   authentication failure;
--   network failure;
--   timeout;
--   database failure;
--   malformed Miniflux response;
--   partial sync failure.
-
-Do not improve error semantics during the compatibility port.
+During the parallel migration the schema, migration metadata, pending-
+mutation encoding, and account scoping must not be redesigned.
 
 ## Database interoperability
 
@@ -178,13 +727,163 @@ representation.
 
 Required directionality during the parallel period:
 
-``` text
-Go writes   -> Rust reads
-Rust writes -> Go reads
-```
+-   Go writes -> Rust reads
+-   Rust writes -> Go reads
 
 Do not redesign schema, migration metadata, pending-mutation encoding,
 or account scoping as part of the language migration.
+
+## Existing test coverage
+
+Go tests that exercise compatibility-relevant behavior:
+
+-   go-core/internal/coreapi/api_test.go
+    -   TestLocalizeRequest
+    -   TestInvalidAndUnconfiguredRequests
+    -   TestConfigureValidatesCredentials
+-   go-core/internal/inbox/service_test.go
+    -   TestSyncWritesAndRetainsLocalSnapshotOffline
+    -   TestStarredReconciliationUsesRemoteDesiredState
+    -   TestSequentialAutomaticReadBatchesRetainEarlierRows
+-   go-core/internal/inbox/store_test.go
+    -   TestStorePersistsLocalSnapshotAndUndo
+    -   TestApplySnapshotPreservesPendingDesiredState
+    -   TestAcknowledgementKeepsNavigationCountsStable
+    -   TestSnapshotPreservesRemoteTotalBeyondCachedRows
+    -   TestCompleteUnreadSnapshotReconcilesExternallyReadEntry
+    -   TestCompleteEmptyUnreadSnapshotReconcilesAllEntries
+    -   TestIncompleteUnreadSnapshotDoesNotReconcileMissingEntry
+    -   TestCompleteFilteredSnapshotReconcilesOnlyItsScope
+    -   TestCompleteLargeSnapshotReconcilesWithoutSQLiteParameterLimit
+
+These tests cover: localization, JSON validation, configuration
+validation, offline snapshot retention, starred desired-state semantics,
+automatic-read batch retention, persistence, undo, pending preservation,
+acknowledgement accounting, remote totals beyond cached rows, complete and
+incomplete reconciliation, filtered reconciliation scope, and large
+snapshot handling.
+
+## Code/documentation discrepancies
+
+The following differences were found between the implementation and
+product documentation. The formal compatibility decisions below treat
+these as reference behavior to reproduce rather than defects to fix.
+
+1.  **Selection kind "unread":** model.SelectionUnread exists in
+    go-core/internal/model/browse.go and the Swift ArticleSelection type
+    has an `.unread` constant, but DEVELOPER_MAP.md states there is no
+    separate Unread destination in the native sidebar. The core treats
+    SelectionUnread similarly to all with unreadOnly true.
+2.  **currentStarred field:** CoreRequest includes currentStarred, but the
+    Go dispatcher ignores it. The Swift client does not send it; star
+    mutations rely on local state and a remote re-read.
+3.  **Snapshot schema version:** the documented current schema version is 1,
+    and the Go core hardcodes Version: 1 everywhere. The Swift client does
+    not enforce it yet.
+4.  **Automatic read delayed flush:** SYNC_AND_DATA.md describes an
+    eight-second Undo visibility window and a short delayed flush. The Go
+    code uses a 10-second flush delay for automatic reads in
+    MarkRead(service.go), while the Undo UI timer in BrowserStore.swift is
+    eight seconds.
+5.  **Error language:** many low-level Go store errors are prefixed in
+    German (e.g. "SQLite-Konto anlegen"). Rust should preserve the same
+    visible strings during compatibility testing, even though the language
+    is not a product requirement.
+
+## Formal compatibility decisions
+
+These decisions fix the contract for the duration of the compatibility
+migration. Deliberate product changes require a separate explicit decision.
+
+### 8-second Undo window and 10-second automatic flush
+
+The current timers are intentional and must not be changed during the
+migration. The intended relationship is:
+
+``` text
+automatic read
+     │
+     ├──── Undo available (~8 s)
+     │
+     └──────── remote automatic flush (~10 s)
+```
+
+The ~2-second buffer ensures the Undo affordance normally disappears
+before the automatic remote flush is attempted. Rust must reproduce the
+same effective ordering (Undo window shorter than the delayed flush).
+
+### currentStarred
+
+The `currentStarred` field in the request envelope is currently unused
+compatibility surface. The Swift client does not populate it and the Go
+core does not read it. Star mutations rely on local state and a remote
+re-read before toggling.
+
+Do not remove `currentStarred` during migration. It may be removed or
+activated later as a separate cleanup decision.
+
+### German error strings
+
+Low-level Go/store error strings are part of the externally observable
+reference behavior for compatibility testing. Rust must reproduce the
+same visible error semantics closely enough for differential testing.
+
+Translating, normalizing, or redesigning these errors is a separate
+architectural change that may only happen after Rust parity exists.
+
+### SelectionUnread
+
+`SelectionUnread` is a valid internal selection kind. It must remain
+supported by the core even though the native sidebar does not expose a
+separate Unread destination. The distinction is:
+
+-   Internal/core selection capability: all, unread, starred, category,
+    feed.
+-   Visible sidebar destinations: All, Starred, Categories/Feeds.
+
+Do not remove `SelectionUnread` merely because there is no dedicated
+sidebar item.
+
+### Snapshot version
+
+Snapshot version `1` is the current compatibility contract. The Go core
+hardcodes `Version: 1` in every browse snapshot and Swift currently does
+not strictly enforce the version field. Rust must produce version `1`
+and should tolerate the same lack of strict client enforcement until a
+separate version-policy decision is made.
+
+### Invalid/non-UTF-8 FFI input
+
+The Go implementation uses `C.GoString`, which expects a null-terminated
+byte sequence and silently interprets non-UTF-8 bytes according to Go's
+UTF-8 handling. Exact byte-for-byte equivalence for malformed foreign
+input is neither possible to guarantee nor meaningful to the product.
+
+The Rust skeleton defines deterministic safe behavior:
+
+-   `null` request -> `{"ok":false,"error":"null request"}`.
+-   Non-UTF-8 request -> `{"ok":false,"error":"invalid request: ..."}`.
+-   Malformed JSON -> `{"ok":false,"error":"invalid request: ..."}`.
+
+This matches the observable error shape of the Go core for the cases
+that matter to the Swift caller. Rust must not read past a NUL byte,
+must not retain the input pointer, and must not panic.
+
+## Unresolved compatibility questions
+
+-   What should Rust return when the input C string is not valid UTF-8?
+    Go silently uses C.GoString behavior. A deterministic Rust choice
+    should be documented and tested.
+-   Should the Rust skeleton and early phases also localize validation
+    errors with the same go-i18n catalog, or return stable English strings
+    until Phase 9? The contract currently requires preserving behavior,
+    which implies eventual localization parity.
+-   How should Rust handle configure when the same account ID already
+    exists with a different server? The Go code updates the server column
+    via ON CONFLICT DO UPDATE.
+-   What is the exact behavior when selection.kind is missing or empty in
+    a request? The Go dispatcher does not validate selection before passing
+    it to Normalized(), which falls back to all/unreadOnly true.
 
 ## Contract change rule
 
