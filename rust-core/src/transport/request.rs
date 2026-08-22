@@ -18,6 +18,7 @@ pub struct Selection {
 
 impl Selection {
     /// Converts the wire DTO into normalized domain semantics.
+    #[allow(dead_code)]
     pub fn to_domain(&self) -> crate::domain::selection::Selection {
         crate::domain::selection::Selection::normalize(&self.kind, self.id, self.unread_only)
     }

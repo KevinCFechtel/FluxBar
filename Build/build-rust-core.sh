@@ -6,6 +6,7 @@ REPOSITORY_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${1:?output directory required}"
 shift
 ARCHS=("$@")
+DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
 
 if [[ "${#ARCHS[@]}" -eq 0 ]]; then
   echo "Mindestens eine Architektur ist erforderlich." >&2
@@ -47,7 +48,7 @@ for arch in "${ARCHS[@]}"; do
   arch_dir="${OUTPUT_DIR}/${arch}"
   mkdir -p "${arch_dir}"
 
-  cargo build \
+  MACOSX_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" cargo build \
     --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
     --target "${target}" \
     --release
@@ -88,7 +89,7 @@ int main(void) {
 
     char req[] = "{\"operation\":\"refresh\"}";
     char* r2 = FluxCoreRequest(req);
-    if (strstr(r2, "not implemented: refresh") == NULL) {
+    if (strstr(r2, "Miniflux is not configured") == NULL) {
         fprintf(stderr, "unexpected op response: %s\n", r2);
         return 1;
     }
@@ -98,7 +99,9 @@ int main(void) {
 }
 EOF
 
-cc -o "${SMOKE_DIR}/smoke" "${SMOKE_DIR}/smoke.c" "${OUTPUT_DIR}/libfluxcore.a"
+cc -mmacosx-version-min="${DEPLOYMENT_TARGET}" \
+  -o "${SMOKE_DIR}/smoke" "${SMOKE_DIR}/smoke.c" "${OUTPUT_DIR}/libfluxcore.a" \
+  -framework CoreFoundation -framework Security
 "${SMOKE_DIR}/smoke"
 
 echo "Rust core static library: ${OUTPUT_DIR}/libfluxcore.a"

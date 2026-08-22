@@ -6,28 +6,32 @@
 
 /// Read state using the exact wire strings from the Go core
 /// (`"read"` / `"unread"`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryStatus {
     Read,
     Unread,
+    /// A value accepted and persisted by the Go/SQLite implementation but
+    /// unknown to this version of the Rust domain. It must round-trip without
+    /// loss for existing-database and forward compatibility.
+    Other(String),
 }
 
 impl EntryStatus {
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             EntryStatus::Read => "read",
             EntryStatus::Unread => "unread",
+            EntryStatus::Other(value) => value,
         }
     }
 
-    /// Parses a status string. Returns `None` for unknown values so callers
-    /// cannot silently invent states; the Go core never validates this field,
-    /// which is tracked as a compatibility observation.
-    pub fn parse(value: &str) -> Option<Self> {
+    /// Parses a status string while preserving unknown values accepted by the
+    /// Go/SQLite representation.
+    pub fn parse(value: &str) -> Self {
         match value {
-            "read" => Some(EntryStatus::Read),
-            "unread" => Some(EntryStatus::Unread),
-            _ => None,
+            "read" => EntryStatus::Read,
+            "unread" => EntryStatus::Unread,
+            _ => EntryStatus::Other(value.to_string()),
         }
     }
 }
@@ -101,11 +105,18 @@ mod tests {
 
     #[test]
     fn status_roundtrip() {
-        assert_eq!(EntryStatus::parse("read"), Some(EntryStatus::Read));
-        assert_eq!(EntryStatus::parse("unread"), Some(EntryStatus::Unread));
+        assert_eq!(EntryStatus::parse("read"), EntryStatus::Read);
+        assert_eq!(EntryStatus::parse("unread"), EntryStatus::Unread);
         assert_eq!(EntryStatus::Read.as_str(), "read");
         assert_eq!(EntryStatus::Unread.as_str(), "unread");
-        assert_eq!(EntryStatus::parse("bogus"), None);
+        assert_eq!(
+            EntryStatus::parse("future-status"),
+            EntryStatus::Other("future-status".to_string())
+        );
+        assert_eq!(
+            EntryStatus::parse("future-status").as_str(),
+            "future-status"
+        );
     }
 
     #[test]

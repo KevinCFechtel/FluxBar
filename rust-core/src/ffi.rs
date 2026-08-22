@@ -21,7 +21,12 @@ use std::ffi::{CStr, CString, c_char};
 use std::panic::AssertUnwindSafe;
 
 use crate::dispatcher::dispatch;
+use crate::runtime::AppRuntime;
 use crate::transport::{Request, Response};
+
+/// Process-wide runtime shared by every request, mirroring Go's package-level
+/// `runtime` variable.
+static RUNTIME: AppRuntime = AppRuntime::new();
 
 const PANIC_ERROR: &str = r#"{"ok":false,"error":"internal error"}"#;
 
@@ -35,7 +40,7 @@ const PANIC_ERROR: &str = r#"{"ok":false,"error":"internal error"}"#;
 pub unsafe extern "C" fn FluxCoreRequest(request: *mut c_char) -> *mut c_char {
     let input = parse_input(request);
 
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| process(input)));
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| process(input, &RUNTIME)));
 
     match result {
         Ok(response_json) => into_owned_c_string(response_json),
@@ -63,17 +68,17 @@ enum Input {
     InvalidUtf8(String),
 }
 
-fn process(input: Input) -> String {
+fn process(input: Input, runtime: &AppRuntime) -> String {
     match input {
         Input::Null => Response::null_request().to_json(),
         Input::InvalidUtf8(reason) => {
             Response::invalid_request(&format!("request is not valid UTF-8: {reason}")).to_json()
         }
-        Input::Utf8(json) => handle_json(&json),
+        Input::Utf8(json) => handle_json(&json, runtime),
     }
 }
 
-fn handle_json(json: &str) -> String {
+fn handle_json(json: &str, runtime: &AppRuntime) -> String {
     let request: Request = match serde_json::from_str(json) {
         Ok(r) => r,
         Err(e) => return Response::invalid_request(&e.to_string()).to_json(),
@@ -93,7 +98,7 @@ fn handle_json(json: &str) -> String {
         }
     };
 
-    dispatch(operation).to_json()
+    dispatch(operation, runtime).to_json()
 }
 
 /// Releases a response string previously returned by `FluxCoreRequest`.

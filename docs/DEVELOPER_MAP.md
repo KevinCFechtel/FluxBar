@@ -166,13 +166,21 @@ The script dispatches to the Go or Rust core based on the `FLUX_CORE`
 environment variable. `FLUX_CORE=go` (or unset) is the default;
 `FLUX_CORE=rust` is experimental and incomplete.
 
-The Rust core has reached Phase 4 of the migration: it understands the
+The Rust core has reached Phase 8 of the migration: it understands the
 complete external JSON request envelope, dispatches every supported
-operation through a typed handler boundary, and now also owns a pure
-domain layer (selection normalization, entry/feed/category models,
-account ID derivation, navigation building/sorting). SQLite, Miniflux,
-snapshots, icons, localization, mutations, and sync remain unimplemented
-in Rust.
+operation through a typed handler boundary, owns a pure domain layer, a
+Go-compatible synchronous SQLite persistence adapter, and now a local
+snapshot/presentation assembler. The `local_snapshot` operation and a
+local-only subset of `configure` (validation, account derivation, store
+open; Go's configure itself has no remote effects) are implemented.
+An isolated Miniflux remote adapter exists behind a testable trait. Rust now
+also implements refresh/reconciliation, local read/star desired state,
+durable coalesced pending mutations, ordered successful-prefix flush,
+automatic-read Undo/discard, the 10-second delayed flush, and article
+preview/image extraction matching the Go core. `refresh`, `set_read`,
+`set_starred`, `undo_read`, `discard_undo`, and `flush_pending` are real
+handlers. Feed-icon processing and localization remain deferred; Rust is
+still experimental and Go remains the default.
 
 Initial migration constraints:
 

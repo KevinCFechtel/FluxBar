@@ -32,10 +32,16 @@
 //! intentionally not implemented yet. All `unsafe` code is confined to the
 //! `ffi` module.
 
+pub mod article;
 mod dispatcher;
-mod domain;
+pub mod domain;
 mod ffi;
-mod transport;
+pub mod persistence;
+pub mod remote;
+pub mod runtime;
+pub mod snapshot;
+pub mod sync;
+pub mod transport;
 
 // Re-export the C ABI so the crate's `.staticlib` contains the expected
 // symbols. The transport and dispatcher modules are crate-private for now.

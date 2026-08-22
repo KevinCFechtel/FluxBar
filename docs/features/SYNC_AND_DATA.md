@@ -15,6 +15,30 @@ selections are fully paginated in 200-entry pages before negative
 reconciliation. The local popover snapshot remains capped at 200 rows
 for responsive presentation.
 
+During the staged Rust migration, Go remains the production/reference owner.
+The experimental Rust core now reproduces local snapshots, Miniflux remote
+behavior, refresh/reconciliation, effective versus remote state, durable
+pending read/star mutations, successful-prefix flush, Undo/discard, the
+10-second automatic-read delay, and article preview/image extraction.
+Differential tests compare JSON, database state, pending/Undo rows, fake
+remote requests, and processed article fields. Automated Rust tests use
+temporary databases and fake credentials and never open the user's production
+database or contact a real account.
+
+The persisted state machine keeps effective `status`/`starred` separate from
+`remote_status`/`remote_starred`. A pending row is the durable desired value
+and prevents stale refresh data from replacing effective presentation state.
+Only a fully paginated stable remote result can negatively reconcile absence.
+Flush processes pending rows by update time, acknowledges each success, and
+stops at the first failure, leaving the failed and unattempted suffix queued.
+
+Automatic read batches record prior read values in durable Undo rows. Undo
+restores those values and replaces or creates pending desired state; discard
+only removes Undo metadata. The Swift affordance remains visible for eight
+seconds while the core delay remains ten seconds. One resettable scheduler is
+owned by each configured account service, so delayed work cannot cross to a
+replacement account.
+
 ## Local-First Desktop Behavior
 
 FluxBar Desktop should keep a local SQLite representation of news/state.

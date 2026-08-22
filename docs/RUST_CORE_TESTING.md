@@ -105,6 +105,86 @@ During the parallel period test:
 
 Never use the developer's real FluxBar database in automated tests.
 
+Phase 5 persistence validation uses:
+
+``` sh
+Build/test-sqlite-compat.sh
+```
+
+The script creates fresh databases under `mktemp`, has Go create/write a
+database that Rust opens/reads, then has Rust create/write a database that Go
+opens/reads. It also compares normalized `sqlite_master` definitions. Both
+test helpers reject paths outside the operating system temporary directory.
+
+Rust unit tests additionally verify exact table/column metadata, indexes,
+defaults, constraints, absent foreign keys, `user_version=0`, connection
+PRAGMAs, 0600 permissions, account isolation, rollback, partial-schema
+initialization, Boolean/timestamp encodings, and lossless unknown-status
+round trips.
+
+Remote adapter validation (Phase 7) uses:
+
+``` sh
+Build/test-remote-compat.sh
+```
+
+A deterministic fake Miniflux server feeds identical selections to the
+production Go Browse path and the Rust adapter; snapshot JSON must match
+exactly for all/unread/starred/category/feed selections, and both sides
+must fail on a truncated paginated sequence. Adapter unit tests use an
+in-process fake TCP server for auth headers, query construction,
+pagination edge cases, error taxonomy, counters/icon/mutation wire
+formats, and never require internet access or real credentials.
+
+Phase 6 local-snapshot validation uses:
+
+``` sh
+Build/test-snapshot-compat.sh
+```
+
+The harness builds deterministic fixture databases with the Go helper
+(empty; basic; 205-row limit; two-account isolation), feeds identical
+selection/retention inputs to both cores' snapshot implementations, and
+compares the JSON semantically. Covered cases include every selection kind
+and fallbacks, unreadOnly combinations, retained locally-read entries,
+multi-account isolation, the 200-entry boundary with ordering in both
+directions, retention of an ID outside the first page, and unknown persisted
+status values. Rust unit tests mirror the same semantics directly.
+
+Phase 8 sync/state-machine validation uses:
+
+``` sh
+Build/test-sync-compat.sh
+```
+
+Each implementation receives a fresh temporary database and fresh stateful
+fake Miniflux server. The harness compares response JSON, normalized account/
+navigation/selection/entry rows, pending revisions, Undo rows, exact HTTP
+request sequences, and final snapshots. Scenarios cover initial/incremental
+refresh, new/changed remote state, incomplete pagination, auth/5xx partial
+refresh, read/star mutation and reversal, stale remote state with pending
+desired values, Undo before/after delivery, discard, full first-mutation
+failure, and successful-prefix partial failure.
+
+Phase 9.1 article-processing validation uses:
+
+``` sh
+Build/test-article-compat.sh
+```
+
+A shared JSON fixture feeds identical article HTML/content, base URLs, and
+enclosure lists to the Go and Rust article processors. The harness compares
+the produced preview text and resolved image URL exactly. Fixtures cover
+empty content, plain text, paragraphs, nested tags, line breaks, HTML
+entities, Unicode, whitespace normalization, truncation, malformed HTML,
+inline images, relative/absolute/invalid URLs, lazy/responsive attributes,
+tiny-image skip, and image-enclosure fallback.
+
+The SQLite suite also creates pending read/star and Undo state in each
+implementation and has the other implementation continue it. Timer unit tests
+use a narrowly injected short automatic delay instead of repeatedly sleeping
+10 seconds; production always uses 10 seconds.
+
 ## Sync scenarios
 
 Tests should reflect the documented local-first behavior, including:

@@ -440,8 +440,11 @@ selection_totals, and deletes acknowledged pending_mutations.
 
 **Remote effects:** sends SetReadBatch, EntryState, and ToggleStarred calls.
 
-**Partial-success behavior:** none; a single failed remote mutation aborts
-the flush and leaves all pending mutations in place.
+**Partial-success behavior:** successful mutations are acknowledged one by
+one. If a later mutation fails, that mutation and all unattempted suffix
+mutations remain pending, but previously successful mutations have already
+been acknowledged and removed. There is no transaction spanning the full
+flush or its remote calls.
 
 **Reference implementation/tests:**
 
@@ -625,6 +628,44 @@ Selection normalization (model.Selection.Normalized):
 The local snapshot limits returned entries to 200 rows, but total may
 reflect the full remote count for the selection.
 
+## Article processing compatibility
+
+Observed from `go-core/internal/article/text.go` and
+`go-core/internal/miniflux/service.go`:
+
+-   Preview extraction happens during `mapEntries`, before the entry is written
+    to SQLite. The Go core calls `article.Extract(source.Content, source.URL,
+    article.PreviewLimit)`.
+-   `PreviewLimit` is 600 runes.
+-   Preview text is built by walking the HTML tree depth-first:
+    -   `<script>`, `<style>`, `<head>`, `<noscript>`, `<template>` and their
+        descendants are ignored.
+    -   Text nodes are appended verbatim.
+    -   `<br>` emits a newline.
+    -   `<img alt="...">` emits the alt text surrounded by single spaces.
+    -   Block elements emit a newline before and after their children.
+-   After the walk, the result is split on newlines; each line is collapsed to
+    a single space between whitespace-separated tokens; empty lines are
+    removed; remaining lines are joined with `\n`.
+-   The final text is truncated to `limit - 1` runes with `strings.TrimSpace`,
+    then suffixed with the Unicode ellipsis `…` (U+2026) when longer than the
+    limit.
+-   Image extraction also walks the tree depth-first and considers `<img>` and
+    `<source>` elements. An element is skipped when both `width` and `height`
+    attributes are present, parseable as non-negative integers, and `<= 2`.
+-   Image attribute priority: `data-src`, `data-original`, `src`,
+    `data-srcset`, `srcset`.
+-   For `srcset`/`data-srcset` values, the candidate is the first whitespace-
+    separated token of the last comma-separated part that has any token.
+-   URL resolution trims whitespace, rejects `data:` URLs case-insensitively,
+    resolves relative references against the article URL, and accepts only
+    `http` and `https` schemes.
+-   If no inline image resolves, the first Miniflux enclosure whose trimmed,
+    lowercased MIME type (part before `;`) starts with `image/` and whose URL
+    resolves to HTTP(S) is used.
+-   Processed `preview` and `image_url` values are persisted in the `entries`
+    table and round-trip through both Go and Rust stores.
+
 ## Data/sync compatibility that must be preserved
 
 Observed from the implementation:
@@ -646,6 +687,13 @@ Observed from the implementation:
 -   Failed/duplicated/reordered/count-inconsistent pages leave the last
     local snapshot intact.
 -   The local popover snapshot is capped at 200 rows.
+-   Presentation retention is caller-driven: `retainEntryIDs` are ORed into
+    the entry query together with the selection clause before the 200-row
+    limit, so a locally read entry stays visible while its ID is retained by
+    the native client.
+-   Snapshot navigation ordering uses SQLite `COLLATE NOCASE` (ASCII-only),
+    not full Unicode case folding.
+-   An empty category list marshals as JSON `null` (Go nil slice).
 -   Feed-icon bytes are not part of browse snapshots and are not persisted
     to disk.
 -   Browse snapshot compatibility is versioned; the current schema version
@@ -703,6 +751,10 @@ The SQLite store is opened lazily by Runtime.currentStore:
 -   The database file is chmod 0600 after opening.
 -   Schema is created via CREATE TABLE IF NOT EXISTS in
     go-core/internal/inbox/store.go migrate().
+-   There is no migration table and no database schema version. SQLite
+    `PRAGMA user_version` remains 0. The snapshot JSON version is unrelated.
+-   The schema declares no foreign keys. Foreign-key enforcement is still
+    enabled as part of the connection contract.
 
 Tables created by the Go core:
 
@@ -717,6 +769,22 @@ Tables created by the Go core:
     updated_at)
 -   undo_batches (account_id, id, created_at)
 -   undo_items (account_id, batch_id, entry_id, prior_read)
+
+Declared secondary indexes:
+
+-   entries_account_published (account_id, published_at)
+-   entries_account_feed (account_id, feed_id, published_at)
+-   entries_account_category (account_id, category_id, published_at)
+
+The only explicit CHECK constraint is pending_mutations.field IN
+('read', 'starred'). Boolean values are stored as SQLite INTEGER values.
+Timestamps are UTC RFC3339Nano strings.
+
+The intended entry-status domain is read/unread, but the physical Go/SQLite
+representation is open: status columns have no CHECK constraint and Go scans
+arbitrary strings without validation. Rust therefore preserves unknown status
+values losslessly instead of rejecting or normalizing databases accepted by
+Go.
 
 Account ID derivation:
 
@@ -737,6 +805,55 @@ Required directionality during the parallel period:
 
 Do not redesign schema, migration metadata, pending-mutation encoding,
 or account scoping as part of the language migration.
+
+Phase 5 uses the same unversioned schema through a synchronous, single-
+connection Rust adapter. The adapter receives an explicit path; production
+path discovery remains outside portable persistence. Interoperability tests
+use temporary databases only and cover both Go-write/Rust-read and
+Rust-write/Go-read directions.
+
+## Phase 8 synchronization state model
+
+The Go implementation does not store one abstract entry state. The persisted
+relationship is:
+
+-   `entries.remote_status` / `remote_starred`: last observed or acknowledged
+    remote baseline;
+-   `entries.status` / `starred`: effective local/presentation value;
+-   `pending_mutations`: one desired Boolean per account/entry/field, with a
+    replacement revision and update timestamp;
+-   `undo_batches` / `undo_items`: an automatic-read batch and each changed
+    entry's prior read Boolean;
+-   snapshot membership: effective state plus caller-supplied retained IDs,
+    independent from Undo membership.
+
+Applying a remote snapshot always advances remote baselines for returned
+entries. It replaces effective read/star values only when no pending row for
+that field exists. A complete unread result negatively reconciles missing
+remote-unread rows to read; a complete starred result similarly clears remote
+starred state. Category/feed scope is preserved. Incomplete or failed
+pagination is never passed to persistence and therefore cannot trigger this
+negative reconciliation.
+
+Local read/star mutations update effective state and upsert their pending row
+in one transaction. Replacement changes `desired`, increments `revision`, and
+updates `updated_at`; rows are ordered by `updated_at` for flush. Acknowledge
+updates the remote baseline and counters, then deletes only the exact observed
+revision, protecting a superseding concurrent value.
+
+Automatic reads create Undo rows only for entries whose effective status
+actually changes. Undo restores each recorded prior Boolean, upserts the
+corresponding desired read mutation (including a compensating mutation after
+remote delivery), and deletes the batch/items atomically. Discard deletes only
+Undo metadata. Manual reads remove Undo membership for affected entries and
+clean empty batches.
+
+One per-service delayed flush schedule is reset by every scheduled mutation.
+Automatic reads schedule 10 seconds; manual reads, stars, and Undo schedule
+immediately. Explicit flush does not cancel a scheduled callback. The native
+Undo affordance remains 8 seconds, preserving the intentional two-second
+buffer. A reconfigured service remains account-bound, so an already scheduled
+callback can only flush the account that created it.
 
 ## Existing test coverage
 

@@ -26,9 +26,10 @@ even though the lower-level `Build/build-go-core.sh` script can combine
 multiple architectures.
 
 `Build/build-rust.sh` builds the same native application against the Rust
-core in `rust-core/`. The Rust core is experimental and currently a
-skeleton; it is useful for compatibility testing and linker validation,
-not for daily use.
+core in `rust-core/`. The Rust core is experimental through migration Phase 8:
+sync and mutations are implemented, while supporting services such as feed
+icons and localization remain incomplete. It is useful for compatibility
+testing and linker validation, not for production or daily use.
 
 `Build/release-go.sh` implements the direct-distribution path for the
 Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It

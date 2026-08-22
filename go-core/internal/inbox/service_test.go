@@ -14,6 +14,7 @@ type fakeRemote struct {
 	snapshot    model.BrowseSnapshot
 	browseError error
 	readCalls   []bool
+	readErrorAt int
 	starred     bool
 	toggleCalls int
 }
@@ -28,6 +29,9 @@ func (remote *fakeRemote) SetReadBatch(_ context.Context, _ []int64, read bool) 
 	remote.mu.Lock()
 	defer remote.mu.Unlock()
 	remote.readCalls = append(remote.readCalls, read)
+	if remote.readErrorAt > 0 && len(remote.readCalls) == remote.readErrorAt {
+		return errors.New("read failed")
+	}
 	return nil
 }
 func (remote *fakeRemote) EntryState(context.Context, int64) (RemoteEntryState, error) {
@@ -113,4 +117,48 @@ func TestSequentialAutomaticReadBatchesRetainEarlierRows(t *testing.T) {
 	if len(second.Entries) != 2 || second.Total != 0 || second.Entries[0].Status != "read" || second.Entries[1].Status != "read" {
 		t.Fatalf("second batch: entries=%#v total=%d", second.Entries, second.Total)
 	}
+}
+
+func TestFlushAcknowledgesSuccessfulPrefixAndStopsAtFirstFailure(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetRead(ctx, "account", []int64{1, 2}, true, false); err != nil {
+		t.Fatal(err)
+	}
+	remote := &fakeRemote{readErrorAt: 2}
+	service := NewService(store, remote, "account", false, nil)
+	if err := service.Flush(ctx); err == nil || err.Error() != "read failed" {
+		t.Fatalf("flush error = %v", err)
+	}
+	pending, err := store.Pending(ctx, "account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].EntryID != 2 {
+		t.Fatalf("pending after partial failure = %#v", pending)
+	}
+	first, err := store.entryState(ctx, "account", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.entryState(ctx, "account", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.remoteStatus != "read" || second.remoteStatus != "unread" {
+		t.Fatalf("remote baselines after partial failure = %#v %#v", first, second)
+	}
+}
+
+type storedEntryState struct {
+	remoteStatus string
+}
+
+func (store *Store) entryState(ctx context.Context, accountID string, entryID int64) (storedEntryState, error) {
+	var state storedEntryState
+	err := store.db.QueryRowContext(ctx, `SELECT remote_status FROM entries WHERE account_id=? AND id=?`, accountID, entryID).Scan(&state.remoteStatus)
+	return state, err
 }

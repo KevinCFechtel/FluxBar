@@ -1,0 +1,171 @@
+{
+  "cases": [
+    {
+      "name": "empty",
+      "content": "",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "plain_text",
+      "content": "Hello world",
+      "base_url": "",
+      "limit": 600
+    },
+    {
+      "name": "single_paragraph",
+      "content": "<p>One paragraph.</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "multiple_paragraphs",
+      "content": "<p>First paragraph.</p><p>Second paragraph.</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "nested_tags",
+      "content": "<div><p>Outer <strong>bold <em>italic</em></strong> text.</p></div>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "br_handling",
+      "content": "<p>Line one.<br>Line two.</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "html_entities",
+      "content": "<p>Eine &amp; zwei &lt; drei.</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "unicode",
+      "content": "<p>日本語 テキスト</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "excessive_whitespace",
+      "content": "<p>   Lots   of   spaces   and\n\nnewlines   </p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "long_content_truncation",
+      "content": "<p>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "malformed_html",
+      "content": "<p>Unclosed paragraph <div>nested block</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "one_image",
+      "content": "<p>Text</p><img src=\"/image.jpg\" alt=\"An image\">",
+      "base_url": "https://example.com/article/",
+      "limit": 600
+    },
+    {
+      "name": "multiple_images",
+      "content": "<img src=\"https://example.com/first.jpg\"><img src=\"https://example.com/second.jpg\">",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "relative_image_url",
+      "content": "<img src=\"../image.jpg\" alt=\"Relative\">",
+      "base_url": "https://example.com/article/page.html",
+      "limit": 600
+    },
+    {
+      "name": "absolute_image_url",
+      "content": "<img src=\"https://cdn.example.com/image.jpg\">",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "protocol_relative_image_url",
+      "content": "<img src=\"//cdn.example.com/image.jpg\">",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "invalid_image_url",
+      "content": "<img src=\"javascript:void(0)\"><img src=\"data:image/png;base64,abc\"><p>Text</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "image_only_content",
+      "content": "<img src=\"https://example.com/photo.jpg\" alt=\"Photo only\">",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "missing_article_url_base",
+      "content": "<img src=\"/image.jpg\" alt=\"No base\"><p>Text</p>",
+      "base_url": "",
+      "limit": 600
+    },
+    {
+      "name": "scripts_styles",
+      "content": "<style>body { color: red; }</style><script>alert('ignored');</script><p>Visible text</p>",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "lazy_attributes",
+      "content": "<img data-src=\"https://example.com/lazy.jpg\" src=\"placeholder.jpg\">",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "srcset_image",
+      "content": "<img srcset=\"small.jpg 320w, large.jpg 1280w\" src=\"fallback.jpg\">",
+      "base_url": "https://example.com/article/",
+      "limit": 600
+    },
+    {
+      "name": "tiny_image_skipped",
+      "content": "<img width=\"1\" height=\"1\" src=\"https://example.com/tracker.gif\"><img src=\"https://example.com/article.jpg\">",
+      "base_url": "https://example.com/",
+      "limit": 600
+    },
+    {
+      "name": "enclosure_fallback",
+      "content": "<p>No inline image</p>",
+      "base_url": "https://example.com/article/",
+      "limit": 600,
+      "enclosures": [
+        { "url": "https://example.com/audio.mp3", "mime_type": "audio/mpeg" },
+        { "url": "/images/cover.jpg", "mime_type": " Image/JPEG; charset=binary " }
+      ]
+    },
+    {
+      "name": "enclosure_invalid_skipped",
+      "content": "<p>Text</p>",
+      "base_url": "https://example.com/article/",
+      "limit": 600,
+      "enclosures": [
+        { "url": "https://example.com/video.mp4", "mime_type": "video/mp4" },
+        { "url": "file:///tmp/image.jpg", "mime_type": "image/jpeg" }
+      ]
+    },
+    {
+      "name": "inline_preferred_over_enclosure",
+      "content": "<img src=\"/images/inline.jpg\">",
+      "base_url": "https://example.com/article/",
+      "limit": 600,
+      "enclosures": [
+        { "url": "/images/attachment.jpg", "mime_type": "image/jpeg" }
+      ]
+    }
+  ]
+}

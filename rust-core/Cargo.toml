@@ -13,6 +13,22 @@ serde_json = "1"
 # SHA-256 for account identity derivation; must match the Go core byte for
 # byte. Pure Rust implementation with no transitive dependencies.
 sha2 = "0.10"
+rusqlite = { version = "0.37", features = ["bundled"] }
+# Synchronous Miniflux HTTP client. Blocking API matches the synchronous core
+# without an async runtime. native-tls keeps OS trust-store semantics (Go
+# parity): Security.framework on macOS/iOS, later rustls evaluation possible
+# for Android/Linux targets.
+ureq = { version = "2", features = ["native-tls"], default-features = false }
+# RFC3339Nano-compatible UTC timestamps for pending/Undo rows and sync state.
+time = { version = "=0.3.41", features = ["formatting"] }
+# HTML5 parser for Go-compatible article preview/image extraction (Phase 9.1).
+# html5ever and markup5ever_rcdom are pure Rust; rcdom is a minimal reference
+# DOM, not a browser engine.
+html5ever = "0.39"
+markup5ever_rcdom = "0.39"
+# URL parsing/resolution. Already a transitive dependency of ureq; made
+# explicit because article-image relative URL resolution is a core behavior.
+url = "2"
 
 [profile.release]
 opt-level = 3

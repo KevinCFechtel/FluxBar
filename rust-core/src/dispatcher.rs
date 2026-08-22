@@ -6,23 +6,91 @@
 //! response. Later phases can replace individual handlers with real behavior
 //! without changing the FFI or transport layers.
 
+use crate::runtime::AppRuntime;
 use crate::transport::{Operation, Response};
 
 /// Dispatches a typed operation to its handler.
 ///
-/// Phase 3 handlers are intentionally stubs. The value of this function is
-/// ensuring that the external operation string is correctly recognized and
-/// routed to the correct typed handler.
-pub fn dispatch(operation: Operation) -> Response {
+/// Phase 8 implements configuration, local/remote snapshots, and the complete
+/// read/star/pending/Undo mutation surface. Supporting services remain stubs.
+pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
     match operation {
-        Operation::Configure { .. } => handlers::configure(),
-        Operation::LocalSnapshot { .. } => handlers::local_snapshot(),
-        Operation::Refresh { .. } => handlers::refresh(),
-        Operation::SetRead { .. } => handlers::set_read(),
-        Operation::SetStarred { .. } => handlers::set_starred(),
-        Operation::UndoRead { .. } => handlers::undo_read(),
-        Operation::DiscardUndo { .. } => handlers::discard_undo(),
-        Operation::FlushPending { .. } => handlers::flush_pending(),
+        Operation::Configure {
+            server,
+            api_key,
+            newest_first,
+            configuration_generation,
+            locales: _,
+        } => runtime.configure(&server, &api_key, newest_first, configuration_generation),
+        Operation::LocalSnapshot {
+            selection,
+            retain_entry_ids,
+        } => runtime.local_snapshot(
+            &selection.kind,
+            selection.id,
+            selection.unread_only,
+            &retain_entry_ids,
+        ),
+        Operation::Refresh {
+            selection,
+            retain_entry_ids,
+        } => runtime.refresh(
+            &selection.kind,
+            selection.id,
+            selection.unread_only,
+            &retain_entry_ids,
+        ),
+        Operation::SetRead {
+            selection,
+            entry_id,
+            entry_ids,
+            retain_entry_ids,
+            read,
+            mutation_source,
+        } => runtime.set_read(
+            &selection.kind,
+            selection.id,
+            selection.unread_only,
+            entry_id,
+            &entry_ids,
+            &retain_entry_ids,
+            read,
+            mutation_source == "automatic",
+        ),
+        Operation::SetStarred {
+            selection,
+            entry_id,
+            retain_entry_ids,
+            desired_starred,
+        } => runtime.set_starred(
+            &selection.kind,
+            selection.id,
+            selection.unread_only,
+            entry_id,
+            &retain_entry_ids,
+            desired_starred,
+        ),
+        Operation::UndoRead {
+            selection,
+            mutation_id,
+            retain_entry_ids,
+        } => runtime.undo_read(
+            &selection.kind,
+            selection.id,
+            selection.unread_only,
+            &mutation_id,
+            &retain_entry_ids,
+        ),
+        Operation::DiscardUndo { mutation_id } => runtime.discard_undo(&mutation_id),
+        Operation::FlushPending {
+            selection,
+            retain_entry_ids,
+        } => runtime.flush_pending(
+            &selection.kind,
+            selection.id,
+            selection.unread_only,
+            &retain_entry_ids,
+        ),
         Operation::FeedIcon { .. } => handlers::feed_icon(),
         Operation::Localize { .. } => handlers::localize(),
         Operation::LocalizePlural { .. } => handlers::localize_plural(),
@@ -41,14 +109,6 @@ mod handlers {
         };
     }
 
-    not_implemented!(configure, "configure");
-    not_implemented!(local_snapshot, "local_snapshot");
-    not_implemented!(refresh, "refresh");
-    not_implemented!(set_read, "set_read");
-    not_implemented!(set_starred, "set_starred");
-    not_implemented!(undo_read, "undo_read");
-    not_implemented!(discard_undo, "discard_undo");
-    not_implemented!(flush_pending, "flush_pending");
     not_implemented!(feed_icon, "feed_icon");
     not_implemented!(localize, "localize");
     not_implemented!(localize_plural, "localize_plural");
@@ -58,76 +118,10 @@ mod handlers {
 mod tests {
     use super::*;
     use crate::transport::Operation;
-    use crate::transport::request::Selection;
 
     #[test]
     fn dispatch_routes_to_correct_handler() {
         let cases = vec![
-            (
-                Operation::Configure {
-                    server: String::new(),
-                    api_key: String::new(),
-                    newest_first: false,
-                    configuration_generation: 0,
-                    locales: vec![],
-                },
-                "configure",
-            ),
-            (
-                Operation::LocalSnapshot {
-                    selection: Selection::default(),
-                    retain_entry_ids: vec![],
-                },
-                "local_snapshot",
-            ),
-            (
-                Operation::Refresh {
-                    selection: Selection::default(),
-                    retain_entry_ids: vec![],
-                },
-                "refresh",
-            ),
-            (
-                Operation::SetRead {
-                    selection: Selection::default(),
-                    entry_id: 0,
-                    entry_ids: vec![],
-                    retain_entry_ids: vec![],
-                    read: false,
-                    mutation_source: String::new(),
-                },
-                "set_read",
-            ),
-            (
-                Operation::SetStarred {
-                    selection: Selection::default(),
-                    entry_id: 0,
-                    retain_entry_ids: vec![],
-                    desired_starred: false,
-                },
-                "set_starred",
-            ),
-            (
-                Operation::UndoRead {
-                    selection: Selection::default(),
-                    mutation_id: String::new(),
-                    retain_entry_ids: vec![],
-                },
-                "undo_read",
-            ),
-            (
-                Operation::DiscardUndo {
-                    mutation_id: String::new(),
-                },
-                "discard_undo",
-            ),
-            (
-                Operation::FlushPending {
-                    selection: Selection::default(),
-                    retain_entry_ids: vec![],
-                },
-                "flush_pending",
-            ),
             (
                 Operation::FeedIcon {
                     feed_id: 0,
@@ -154,13 +148,50 @@ mod tests {
                 "localize_plural",
             ),
         ];
+        let runtime = crate::runtime::AppRuntime::new();
         for (op, expected_name) in cases {
-            let resp = dispatch(op);
+            let resp = dispatch(op, &runtime);
             assert!(!resp.ok);
             assert!(
                 resp.error
                     .contains(&format!("not implemented: {expected_name}"))
             );
         }
+    }
+
+    #[test]
+    fn implemented_local_handlers_route_correctly() {
+        use crate::transport::request::Selection;
+
+        let runtime = crate::runtime::AppRuntime::new();
+
+        // configure routes into validation (empty credentials -> Go's
+        // localized-fallback error, not "not implemented").
+        let configure_response = dispatch(
+            Operation::Configure {
+                server: String::new(),
+                api_key: String::new(),
+                newest_first: false,
+                configuration_generation: 0,
+                locales: vec![],
+            },
+            &runtime,
+        );
+        assert!(!configure_response.ok);
+        assert_eq!(
+            configure_response.error,
+            "The server URL must be a complete HTTP or HTTPS URL."
+        );
+
+        // local_snapshot routes into the runtime and reports unconfigured.
+        let snapshot_response = dispatch(
+            Operation::LocalSnapshot {
+                selection: Selection::default(),
+                retain_entry_ids: vec![],
+            },
+            &runtime,
+        );
+        assert!(!snapshot_response.ok);
+        assert_eq!(snapshot_response.error, "Miniflux is not configured");
     }
 }

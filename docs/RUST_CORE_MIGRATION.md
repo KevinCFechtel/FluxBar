@@ -220,6 +220,32 @@ Rust DB -> Go
 
 Use fixture copies, never the developer's real database.
 
+The Phase 5 Rust adapter is synchronous and uses `rusqlite` with bundled
+SQLite. Bundling matches Go's SQLite amalgamation model and provides a
+consistent SQLite implementation across the planned portable targets without
+introducing an async runtime or ORM. One `Connection` is retained directly,
+matching Go's `MaxOpenConns(1)` assumption.
+
+Implemented persistence scope:
+
+-   explicit-path store open/create, exact idempotent schema bootstrap, WAL,
+    foreign keys enabled, synchronous NORMAL, 5-second busy timeout, and 0600
+    database-file permissions on Unix;
+-   account upsert preserving counters/timestamps;
+-   low-level account-scoped category, feed, selection-total, and exact entry
+    row primitives;
+-   separate `PersistedEntry` for remote baseline fields, keeping SQLite state
+    out of the domain `Entry`;
+-   lossless unknown entry-status round trips through `EntryStatus::Other`;
+-   temporary Go-to-Rust and Rust-to-Go interoperability tests.
+
+There is no historical migration/version mechanism to port: Go uses only
+`CREATE TABLE/INDEX IF NOT EXISTS`, and `PRAGMA user_version` remains 0.
+Pending/Undo tables are created and preserved, but their behavior is deferred.
+Also deferred: `ApplySnapshot` and negative reconciliation (sync behavior),
+`Snapshot`/navigation query assembly (Phase 6), and all read/star/pending/Undo
+mutation operations (Phase 8).
+
 ## Phase 6 --- Local snapshots
 
 Implement the local browse/snapshot path first.
@@ -228,12 +254,60 @@ Compare normalized Go and Rust outputs over representative database
 fixtures, including the documented 200-row presentation cap and snapshot
 schema version.
 
+Implemented as `rust-core/src/snapshot.rs`, converting persistence results
+(`SnapshotData`) into transport DTOs. Semantics ported from
+`go-core/internal/inbox/store.go Snapshot`:
+
+-   selection normalization happens in the store path; the normalized
+    selection is echoed in the response (`categories` marshals as JSON
+    `null` when empty, matching Go's nil slice);
+-   entries are queried with `(selection clause) OR (account_id=? AND id IN
+    retainEntryIDs)` before `ORDER BY published_at ASC|DESC LIMIT 200`;
+    presentation retention is therefore caller-driven via retained IDs;
+-   navigation reads categories/feeds ordered by SQLite `COLLATE NOCASE`
+    (ASCII case-insensitive), skips orphan feeds, applies per-feed pending
+    read deltas (query errors ignored), and clamps counts at zero;
+-   totals use `max(COUNT(*), max(0, remote_total + pending_delta))` when a
+    `selection_totals` row exists;
+-   starred total = `remote_starred_total` + pending starred delta; a
+    missing account row is an error, as in Go.
+
+The public `local_snapshot` handler is real (local state only). `configure`
+is implemented as a network-free local subset that is externally equivalent
+to Go (Go configure performs no remote effects), except validation errors
+are English-only until localization parity arrives in Phase 9.
+
 ## Phase 7 --- Miniflux adapter
 
 Implement only the API surface FluxBar actually uses.
 
 Keep remote DTOs separate from domain models and make remote access
 replaceable by a test fake/mock.
+
+`rust-core/src/remote/` implements the audited surface: entries listing
+with Go-identical query strings (alphabetically sorted parameters,
+repeated `status` keys), single entry fetch, categories, feeds,
+unread counters, raw icon data URL, `PUT /v1/entries` read batches, and
+`PUT /v1/entries/{id}/star`. Authentication uses the `X-Auth-Token`
+header; requests carry the Go client's user agent. The blocking `ureq`
+client with native-tls preserves OS trust-store semantics (no async
+runtime); the 80-second per-request timeout mirrors the Go library
+default while operation deadlines remain dispatcher-owned.
+
+The pagination primitive reproduces `fetchCompleteSelection`: ascending
+entry-ID cursor via `after_entry_id`, first response's total as
+authoritative, strict per-page stability and cross-page uniqueness
+checks, and short-page/cursor-stall/growing-total failures with Go's
+German compatibility messages.
+
+DTO-to-domain conversion (`remote::entry_to_domain`) preserves the
+`mapEntries` feed fallback quirks; preview/image extraction stays
+deferred to Phase 9. `RemoteInbox` lets Phase 8 orchestrate against a
+fake without HTTP. Differential tests (`Build/test-remote-compat.sh`)
+compare production Go Browse against the Rust adapter over a scripted
+fake server for every selection kind plus truncated-pagination failure.
+No persistence wiring and no public handler changes occur in this
+phase: `refresh` remains a stub.
 
 ## Phase 8 --- Sync and mutations
 
@@ -251,16 +325,84 @@ Port in controlled increments:
 
 This phase receives the highest compatibility scrutiny.
 
+Implemented in `rust-core/src/sync.rs` and the existing persistence/runtime
+adapters:
+
+-   initial and incremental refresh through `RemoteInbox`, including the
+    Go-compatible request order and partial-success local snapshot;
+-   atomic `ApplySnapshot` behavior, positive reconciliation, scoped negative
+    reconciliation only after strict complete pagination, and pending desired
+    state preservation;
+-   transactional effective read/star changes plus one durable, revisioned,
+    replacing pending row per account/entry/field;
+-   ordered flush with desired-state star re-read, per-mutation acknowledge,
+    first-failure stop, and successful-prefix persistence;
+-   durable Undo batches/items, compensating Undo after delivery, metadata-only
+    discard, and Go-compatible manual-read Undo cleanup;
+-   one resettable account-bound scheduler worker, 10-second automatic delay,
+    immediate manual/star/Undo scheduling, and background panic containment;
+-   absolute 45-second refresh and 30-second flush HTTP deadlines, separate
+    from the 80-second library default and delayed timer;
+-   real public `refresh`, `set_read`, `set_starred`, `undo_read`,
+    `discard_undo`, and `flush_pending` handlers.
+
+The scheduler serializes SQLite and remote activity for each service. This is
+stricter than Go's separate sync/timer/DB locking but preserves operation
+ordering, prevents concurrent use of a `rusqlite::Connection`, and keeps old
+configuration callbacks bound to their original account. No async runtime was
+introduced.
+
+`Build/test-sync-compat.sh` executes identical operation sequences against Go
+and Rust with a stateful fake Miniflux server and compares response JSON,
+normalized database rows (including pending and Undo state), exact remote
+requests, and final snapshots. `Build/test-sqlite-compat.sh` additionally
+continues Go-created mutation/Undo state in Rust and Rust-created state in Go.
+
 ## Phase 9 --- Supporting core services
 
 Port remaining currently used core-owned behavior, including as
 applicable:
 
--   feed icons/cache;
--   article processing;
--   localization.
+-   feed icons/cache (Phase 9.3);
+-   article processing (Phase 9.1, completed);
+-   localization (Phase 9.2).
 
 Preserve documented behavior first. Redesign later.
+
+### Phase 9.1 --- Article processing
+
+Implemented in `rust-core/src/article.rs`:
+
+-   Go-compatible preview extraction from article HTML, including block-element
+    line breaks, `<br>` handling, ignored `<script>`/`<style>`/`<head>` content,
+    whitespace normalization, HTML entity decoding, and rune-based truncation
+    with the `…` suffix.
+-   First-usable image extraction from `<img>` and `<source>` elements, with
+    attribute priority `data-src`, `data-original`, `src`, `data-srcset`,
+    `srcset`, tiny-image skip (width/height both present and `<= 2`), and
+    srcset reverse selection.
+-   Relative URL resolution against the article URL using the `url` crate,
+    rejecting `data:`, `javascript:`, `file:`, and other non-HTTP(S) schemes.
+-   Image-enclosure fallback when no inline image resolves, using the first
+    enclosure whose trimmed MIME type starts with `image/` and whose URL
+    resolves to HTTP(S).
+-   Integration point: `remote::entry_to_domain` applies article processing
+    during refresh before `apply_snapshot`, matching Go's `mapEntries`
+    lifecycle.
+-   Malformed HTML is handled by html5ever's HTML5 error recovery; any
+    unexpected panic during parsing is isolated so one bad article cannot abort
+    a refresh.
+
+Differential coverage:
+
+-   `Build/test-article-compat.sh` compares Go and Rust outputs for a shared
+    fixture set covering empty content, plain text, paragraphs, nested tags,
+    line breaks, entities, Unicode, whitespace, truncation, malformed HTML,
+    inline images, relative/absolute/invalid URLs, image-only content,
+    lazy/responsive attributes, tiny images, and enclosure fallback.
+-   `Build/test-sync-compat.sh` now includes article HTML and enclosures in its
+    fake Miniflux entries and compares persisted `preview`/`image_url` values
+    together with snapshots and request sequences.
 
 ## Phase 10 --- Full Rust-backed application validation
 

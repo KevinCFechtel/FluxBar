@@ -51,9 +51,12 @@ int main(void) {
 }
 EOF
 
-cc -o "${WORK_DIR}/caller-go" "${WORK_DIR}/caller.c" "${GO_DIR}/libfluxcore.a" \
+cc -mmacosx-version-min=15.0 \
+  -o "${WORK_DIR}/caller-go" "${WORK_DIR}/caller.c" "${GO_DIR}/libfluxcore.a" \
   -framework CoreFoundation -framework Security -lresolv
-cc -o "${WORK_DIR}/caller-rust" "${WORK_DIR}/caller.c" "${RUST_DIR}/libfluxcore.a"
+cc -mmacosx-version-min=15.0 \
+  -o "${WORK_DIR}/caller-rust" "${WORK_DIR}/caller.c" "${RUST_DIR}/libfluxcore.a" \
+  -framework CoreFoundation -framework Security
 
 echo ""
 echo "=== Go core ==="

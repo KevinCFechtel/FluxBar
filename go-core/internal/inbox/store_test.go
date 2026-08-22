@@ -72,6 +72,67 @@ func TestStorePersistsLocalSnapshotAndUndo(t *testing.T) {
 	}
 }
 
+func TestPendingReplacementAndUndoAfterAcknowledgement(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := store.SetRead(ctx, "account", []int64{1}, true, true)
+	if err != nil || receipt == nil {
+		t.Fatalf("automatic read receipt=%#v error=%v", receipt, err)
+	}
+	pending, err := store.Pending(ctx, "account")
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending=%#v error=%v", pending, err)
+	}
+	if err := store.Acknowledge(ctx, "account", pending[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Undo(ctx, "account", receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = store.Pending(ctx, "account")
+	if err != nil || len(pending) != 1 || pending[0].Desired || pending[0].Revision != 1 {
+		t.Fatalf("compensating pending=%#v error=%v", pending, err)
+	}
+
+	if _, err := store.SetRead(ctx, "account", []int64{1}, true, false); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = store.Pending(ctx, "account")
+	if err != nil || len(pending) != 1 || !pending[0].Desired || pending[0].Revision != 2 {
+		t.Fatalf("replacement pending=%#v error=%v", pending, err)
+	}
+}
+
+func TestDiscardUndoOnlyRemovesUndoMetadata(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if err := store.ApplySnapshot(ctx, "account", testSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := store.SetRead(ctx, "account", []int64{1}, true, true)
+	if err != nil || receipt == nil {
+		t.Fatalf("receipt=%#v error=%v", receipt, err)
+	}
+	if err := store.DiscardUndo(ctx, "account", receipt.ID); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := store.Pending(ctx, "account")
+	if err != nil || len(pending) != 1 || !pending[0].Desired {
+		t.Fatalf("pending after discard=%#v error=%v", pending, err)
+	}
+	var status string
+	if err := store.db.QueryRowContext(ctx, `SELECT status FROM entries WHERE account_id='account' AND id=1`).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "read" {
+		t.Fatalf("status after discard=%q", status)
+	}
+}
+
 func TestApplySnapshotPreservesPendingDesiredState(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)

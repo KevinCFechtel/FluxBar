@@ -250,6 +250,24 @@ Xcode consumes the same `libfluxcore.a` / `libfluxcore.h` artifact
 contract regardless of implementation. Language migration must not be
 combined with unrelated feature, database, UI, or product redesign.
 
+Rust persistence must use the existing unversioned SQLite schema rather than
+introducing a Rust-specific database or migration version. The portable store
+receives an explicit database path; platform path discovery remains outside
+the persistence layer. SQLite row representations may contain remote baseline
+and compatibility state that must not leak into pure domain models.
+
+Sync compatibility requires separate persisted remote baselines and effective
+local desired state. A pending mutation protects the effective value from a
+stale remote refresh. Negative reconciliation is permitted only after the
+remote adapter has produced a complete, stable selection. Pending rows and
+Undo metadata remain account-scoped and durable across process restart.
+
+Rust sync/flush uses blocking, account-bound orchestration without an async
+runtime. Public refresh/flush deadlines, the Miniflux HTTP library timeout,
+and the delayed automatic-read timer are separate limits. Delayed work may
+retain its original account service after reconfiguration, but can never use
+the replacement account's store or remote client.
+
 After Rust is stable, a typed binding layer such as UniFFI may be
 evaluated separately. That later adapter decision must not leak FFI
 concerns into the Rust domain model.

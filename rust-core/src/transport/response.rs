@@ -16,20 +16,88 @@ pub struct Response {
     #[serde(skip_serializing_if = "String::is_empty", default)]
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot: Option<Snapshot>,
+    pub snapshot: Option<BrowseSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon: Option<Icon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt: Option<Receipt>,
 }
 
-/// Placeholder browse snapshot payload.
-///
-/// Phase 3 does not yet produce real snapshots; this type preserves the
-/// field name so future phases can expand it without changing the envelope.
+/// Wire-form article selection echoed in snapshots (normalized values).
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
-pub struct Snapshot {
+pub struct SelectionDto {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub id: i64,
+    #[serde(
+        default,
+        skip_serializing_if = "std::ops::Not::not",
+        rename = "unreadOnly"
+    )]
+    pub unread_only: bool,
+}
+
+fn is_zero(value: &i64) -> bool {
+    *value == 0
+}
+
+/// Snapshot entry DTO matching `model.Entry` JSON in the Go core.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct EntryDto {
+    pub id: i64,
+    pub title: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "String::is_empty", default)]
+    pub comments_url: String,
+    #[serde(rename = "feedID")]
+    pub feed_id: i64,
+    #[serde(rename = "feedName")]
+    pub feed_name: String,
+    #[serde(rename = "categoryID", skip_serializing_if = "is_zero", default)]
+    pub category_id: i64,
+    #[serde(rename = "publishedAt")]
+    pub published_at: String,
+    pub preview: String,
+    #[serde(rename = "imageURL", skip_serializing_if = "String::is_empty", default)]
+    pub image_url: String,
+    pub status: String,
+    pub starred: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct FeedDto {
+    pub id: i64,
+    pub title: String,
+    #[serde(rename = "categoryID")]
+    pub category_id: i64,
+    #[serde(rename = "unreadCount")]
+    pub unread_count: i32,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct CategoryDto {
+    pub id: i64,
+    pub title: String,
+    #[serde(rename = "unreadCount")]
+    pub unread_count: i32,
+    pub feeds: Vec<FeedDto>,
+}
+
+/// Full browse snapshot payload (`model.BrowseSnapshot`, schema version 1).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BrowseSnapshot {
     pub version: i32,
+    pub selection: SelectionDto,
+    pub entries: Vec<EntryDto>,
+    /// Go marshals a missing category list as JSON `null` (nil slice); this
+    /// is reproduced by serializing an empty list as `None`.
+    pub categories: Option<Vec<CategoryDto>>,
+    pub total: i32,
+    #[serde(rename = "unreadTotal")]
+    pub unread_total: i32,
+    #[serde(rename = "starredTotal")]
+    pub starred_total: i32,
 }
 
 /// Feed icon payload.
@@ -49,6 +117,28 @@ pub struct Receipt {
 }
 
 impl Response {
+    /// Successful empty response.
+    pub fn ok() -> Self {
+        Self {
+            ok: true,
+            ..Default::default()
+        }
+    }
+
+    /// Error response with the supplied message.
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            error: message.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The Go-compatible "not configured" error.
+    pub fn not_configured() -> Self {
+        Self::error("Miniflux is not configured")
+    }
+
     /// Builds the standard Phase 3 "not implemented" response for a known
     /// operation. This matches the deterministic skeleton behavior from
     /// Phase 2 while now routing through the typed dispatcher.
