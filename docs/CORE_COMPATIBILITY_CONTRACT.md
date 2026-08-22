@@ -566,6 +566,11 @@ Any operation value other than the ones above returns:
 
 This is produced by the default branch of the dispatcher.
 
+If the `operation` field is absent from the request JSON, the Go core
+ deserializes it as an empty string and returns
+`unsupported operation ""`. The Rust compatibility layer matches this
+behavior.
+
 ## Snapshot schema
 
 model.BrowseSnapshot is serialized with these JSON fields:

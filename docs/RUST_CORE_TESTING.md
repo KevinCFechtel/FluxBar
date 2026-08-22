@@ -24,6 +24,20 @@ cargo test --manifest-path rust-core/Cargo.toml
 
 Never report a command as successful unless it was executed.
 
+## Rust target prerequisites
+
+The Rust core may require additional cross-compilation targets such as
+`x86_64-apple-darwin`. `Build/build-rust-core.sh` checks that each
+required target is installed and fails with the exact remediation command
+if one is missing. It does not modify the developer or CI toolchain
+automatically.
+
+Install a missing target with:
+
+``` sh
+rustup target add x86_64-apple-darwin
+```
+
 ## ABI tests
 
 Validate the compiled boundary, not only Rust internals.
@@ -146,6 +160,35 @@ core and verify affected behavior.
 
 When both cores are linkable, use the Go build to isolate suspected Rust
 regressions.
+
+## Transport compatibility tests
+
+During the compatibility-api phase, verify that Rust parses and routes
+requests the same way Go does at the transport level. Focus on:
+
+- null request;
+- invalid/non-UTF-8 input;
+- malformed JSON;
+- missing operation field;
+- unknown operation;
+- every supported operation name;
+- operation-specific payload fields and defaults;
+- response envelope shape (`ok`, `error`, `text`, `snapshot`, `icon`,
+  `receipt`).
+
+Domain results are not expected to match until the corresponding business
+logic is ported.
+
+A small shell-based smoke test (`Build/test-core-compat.sh`) builds both
+cores and links a tiny C caller against each to compare transport-level
+behavior for cases that should already match.
+
+For pure domain logic that is not reachable through the C ABI (such as
+selection normalization or account ID derivation), use mirrored test
+vectors: a Go characterization test locks the reference behavior, and the
+Rust side asserts the same expected values. Phase 4 introduced this
+pattern for `Selection.Normalized()` (go-core/internal/model) and
+`AccountID` (go-core/internal/inbox).
 
 ## Difference report
 

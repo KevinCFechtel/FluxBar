@@ -14,14 +14,16 @@ fi
 
 mkdir -p "${OUTPUT_DIR}"
 
-# Ensure the requested Rust targets are available. We install lazily so a
-# developer on Apple Silicon can build arm64-only without needing x86_64,
-# while CI or Intel developers can still produce universal archives.
-ensure_target() {
+# Verify that the requested Rust target is installed. The build script does
+# not modify the developer or CI toolchain automatically.
+require_target() {
   local target="$1"
   if ! rustup target list --installed | grep -qx "${target}"; then
-    echo "Installiere Rust-Ziel: ${target}" >&2
-    rustup target add "${target}"
+    echo "Erforderliches Rust-Ziel ist nicht installiert: ${target}" >&2
+    echo "" >&2
+    echo "Installieren mit:" >&2
+    echo "    rustup target add ${target}" >&2
+    exit 1
   fi
 }
 
@@ -40,7 +42,7 @@ for arch in "${ARCHS[@]}"; do
       ;;
   esac
 
-  ensure_target "${target}"
+  require_target "${target}"
 
   arch_dir="${OUTPUT_DIR}/${arch}"
   mkdir -p "${arch_dir}"

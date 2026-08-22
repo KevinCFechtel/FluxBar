@@ -141,6 +141,63 @@ Port JSON request/response DTOs and dispatcher structure.
 Implement transport behavior before domain behavior. Operations may
 remain explicitly unimplemented behind the correct dispatcher.
 
+The Rust crate separates the external JSON compatibility layer from
+future domain types:
+
+``` text
+rust-core/src/
+├── lib.rs        # module root, re-exports C ABI
+├── ffi.rs        # C-string / panic-safe FFI boundary
+├── transport/    # external request/response DTOs
+│   ├── request.rs
+│   └── response.rs
+└── dispatcher.rs # typed operation dispatch to stub handlers
+```
+
+The `transport` module owns the historical/awkward JSON envelope shared
+by all operations. It deserializes the flat external request and converts
+it into a typed `Operation` enum (configure, local_snapshot, refresh,
+set_read, set_starred, undo_read, discard_undo, flush_pending, feed_icon,
+localize, localize_plural). The dispatcher routes each variant to a stub
+handler that returns a deterministic "not implemented" response.
+
+`FluxCoreRequest` wraps JSON processing in `catch_unwind` so a Rust panic
+never unwinds across the C ABI. Panics produce a deterministic JSON error
+response.
+
+Exit gate: Rust understands every supported operation, routes each to the
+correct handler, and returns compatible error/null/malformed/unknown-
+operation responses. Domain functionality (SQLite, Miniflux, snapshots,
+mutations, icons, localization) remains unimplemented.
+
+## Phase 4 --- Pure domain models/logic
+
+Port models and deterministic transformations.
+
+Use Rust enums, explicit optionality, and typed internal errors where
+appropriate, while keeping JSON compatibility at the adapter.
+
+The domain layer lives under `rust-core/src/domain/`:
+
+-   `selection.rs`: typed `Selection` enum with `normalize()` preserving
+    Go's observable rules, including the quirks that `"all"` echoes an
+    incoming id and `kind=unread` is unread-only regardless of the flag.
+-   `entry.rs`: `Entry` plus a validated `EntryStatus` (`read` / `unread`).
+    Snapshot/UI-only fields (icon bytes) are deliberately absent.
+-   `navigation.rs`: `Feed`, `Category`, and `build_navigation()`
+    porting the pure part of the Miniflux adapter's navigation mapping:
+    orphan-feed skipping, per-category count aggregation, and
+    case-insensitive stable title sorting.
+-   `account.rs`: SHA-256 account ID derivation, byte-compatible with Go
+    (verified against a cross-language test vector).
+
+The domain layer has no serde, JSON, FFI, SQLite, or Miniflux concerns.
+Wire DTOs convert to domain types through an explicit conversion
+(`transport::Selection::to_domain`). Deliberately not ported in this
+phase: HTML preview extraction (needs an HTML-parser dependency),
+icon processing, localization, snapshot assembly (persistence-coupled),
+and store reconciliation logic.
+
 ## Phase 4 --- Pure domain models/logic
 
 Port models and deterministic transformations.

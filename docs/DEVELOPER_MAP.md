@@ -166,6 +166,14 @@ The script dispatches to the Go or Rust core based on the `FLUX_CORE`
 environment variable. `FLUX_CORE=go` (or unset) is the default;
 `FLUX_CORE=rust` is experimental and incomplete.
 
+The Rust core has reached Phase 4 of the migration: it understands the
+complete external JSON request envelope, dispatches every supported
+operation through a typed handler boundary, and now also owns a pure
+domain layer (selection normalization, entry/feed/category models,
+account ID derivation, navigation building/sorting). SQLite, Miniflux,
+snapshots, icons, localization, mutations, and sync remain unimplemented
+in Rust.
+
 Initial migration constraints:
 
 -   preserve the existing bridge and JSON behavior;

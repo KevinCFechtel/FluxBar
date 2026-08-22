@@ -21,8 +21,13 @@ The project is released under the BSD 3-Clause License. Contributions, bug repor
 
 - macOS 15 or later
 - Go 1.25.1 or later
+- Rust (for experimental Rust core builds)
 - Xcode Command Line Tools
 - An accessible Miniflux instance with an API key
+
+The Rust core may require additional targets for cross-compilation, for
+example `x86_64-apple-darwin`. If `Build/build-rust-core.sh` reports a
+missing target, install it with `rustup target add <target>`.
 
 ## Build the App
 
