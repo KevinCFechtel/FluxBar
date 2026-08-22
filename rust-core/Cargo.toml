@@ -29,6 +29,15 @@ markup5ever_rcdom = "0.39"
 # URL parsing/resolution. Already a transitive dependency of ureq; made
 # explicit because article-image relative URL resolution is a core behavior.
 url = "2"
+# Image decoding/encoding for feed-icon normalization (Phase 9.3). Only the
+# formats FluxBar actually encounters are enabled to keep binary size down.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "ico"] }
+# SVG rasterization for feed icons. Default features are disabled; text
+# rendering is omitted because feed icons rarely contain text and it avoids
+# pulling in font databases. This is a documented semantic boundary.
+resvg = { version = "0.48", default-features = false }
+# base64 decoding of Miniflux icon data URLs. Pure Rust, no transitive deps.
+base64 = "0.22"
 
 [profile.release]
 opt-level = 3

@@ -75,11 +75,12 @@ models, filtering semantics, state operations, and shared media logic.
 The native macOS layer should not duplicate business rules merely for UI
 convenience.
 
-Application localization is currently shared Go-core behavior.
-Translation catalogs live under `go-core/internal/localization/translations` and
-are exposed to native platform interfaces through the platform bridge.
-Native interfaces provide their ordered locale preferences and do not
-maintain a duplicate application catalog.
+Application localization is shared core behavior implemented in both the Go
+and Rust cores. Translation catalogs live under
+`go-core/internal/localization/translations` and are embedded by the Rust
+core via `include_str!`, so both implementations share a single source of
+truth. Native interfaces provide their ordered locale preferences through the
+platform bridge and do not maintain a duplicate application catalog.
 
 ### SQLite
 
@@ -178,9 +179,9 @@ also implements refresh/reconciliation, local read/star desired state,
 durable coalesced pending mutations, ordered successful-prefix flush,
 automatic-read Undo/discard, the 10-second delayed flush, and article
 preview/image extraction matching the Go core. `refresh`, `set_read`,
-`set_starred`, `undo_read`, `discard_undo`, and `flush_pending` are real
-handlers. Feed-icon processing and localization remain deferred; Rust is
-still experimental and Go remains the default.
+`set_starred`, `undo_read`, `discard_undo`, `flush_pending`, `localize`, and
+`localize_plural` are real handlers. Feed-icon processing remains deferred;
+Rust is still experimental and Go remains the default.
 
 Initial migration constraints:
 

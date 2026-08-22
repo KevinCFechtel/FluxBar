@@ -36,6 +36,8 @@ pub mod article;
 mod dispatcher;
 pub mod domain;
 mod ffi;
+pub mod icons;
+pub mod localization;
 pub mod persistence;
 pub mod remote;
 pub mod runtime;

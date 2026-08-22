@@ -20,8 +20,14 @@ pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
             api_key,
             newest_first,
             configuration_generation,
-            locales: _,
-        } => runtime.configure(&server, &api_key, newest_first, configuration_generation),
+            locales,
+        } => runtime.configure(
+            &server,
+            &api_key,
+            newest_first,
+            configuration_generation,
+            &locales,
+        ),
         Operation::LocalSnapshot {
             selection,
             retain_entry_ids,
@@ -91,9 +97,19 @@ pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
             selection.unread_only,
             &retain_entry_ids,
         ),
-        Operation::FeedIcon { .. } => handlers::feed_icon(),
-        Operation::Localize { .. } => handlers::localize(),
-        Operation::LocalizePlural { .. } => handlers::localize_plural(),
+        Operation::FeedIcon { feed_id, .. } => runtime.feed_icon(feed_id),
+        Operation::Localize {
+            locales,
+            key,
+            fallback,
+        } => handlers::localize(&locales, &key, &fallback),
+        Operation::LocalizePlural {
+            locales,
+            key,
+            one_fallback,
+            other_fallback,
+            count,
+        } => handlers::localize_plural(&locales, &key, &one_fallback, &other_fallback, count),
     }
 }
 
@@ -101,17 +117,29 @@ pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
 mod handlers {
     use crate::transport::Response;
 
-    macro_rules! not_implemented {
-        ($name:ident, $op:literal) => {
-            pub fn $name() -> Response {
-                Response::not_implemented($op)
-            }
-        };
+    pub fn localize(locales: &[String], key: &str, fallback: &str) -> Response {
+        let localizer = crate::localization::Localizer::new(locales);
+        Response {
+            ok: true,
+            text: localizer.text(key, fallback),
+            ..Response::default()
+        }
     }
 
-    not_implemented!(feed_icon, "feed_icon");
-    not_implemented!(localize, "localize");
-    not_implemented!(localize_plural, "localize_plural");
+    pub fn localize_plural(
+        locales: &[String],
+        key: &str,
+        one_fallback: &str,
+        other_fallback: &str,
+        count: i32,
+    ) -> Response {
+        let localizer = crate::localization::Localizer::new(locales);
+        Response {
+            ok: true,
+            text: localizer.plural(key, one_fallback, other_fallback, count),
+            ..Response::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -120,43 +148,49 @@ mod tests {
     use crate::transport::Operation;
 
     #[test]
-    fn dispatch_routes_to_correct_handler() {
-        let cases = vec![
-            (
-                Operation::FeedIcon {
-                    feed_id: 0,
-                    feed_name: String::new(),
-                },
-                "feed_icon",
-            ),
-            (
-                Operation::Localize {
-                    locales: vec![],
-                    key: String::new(),
-                    fallback: String::new(),
-                },
-                "localize",
-            ),
-            (
-                Operation::LocalizePlural {
-                    locales: vec![],
-                    key: String::new(),
-                    one_fallback: String::new(),
-                    other_fallback: String::new(),
-                    count: 0,
-                },
-                "localize_plural",
-            ),
-        ];
+    fn feed_icon_requires_configuration() {
         let runtime = crate::runtime::AppRuntime::new();
-        for (op, expected_name) in cases {
-            let resp = dispatch(op, &runtime);
-            assert!(!resp.ok);
-            assert!(
-                resp.error
-                    .contains(&format!("not implemented: {expected_name}"))
-            );
-        }
+        let resp = dispatch(
+            Operation::FeedIcon {
+                feed_id: 7,
+                feed_name: String::new(),
+            },
+            &runtime,
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error, "Miniflux is not configured");
+    }
+
+    #[test]
+    fn localize_returns_localized_text() {
+        let runtime = crate::runtime::AppRuntime::new();
+        let resp = dispatch(
+            Operation::Localize {
+                locales: vec!["de-DE".to_string()],
+                key: "menu.refresh".to_string(),
+                fallback: "fallback".to_string(),
+            },
+            &runtime,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.text, "Aktualisieren");
+    }
+
+    #[test]
+    fn localize_plural_returns_localized_text() {
+        let runtime = crate::runtime::AppRuntime::new();
+        let resp = dispatch(
+            Operation::LocalizePlural {
+                locales: vec!["de".to_string()],
+                key: "status.unread_count".to_string(),
+                one_fallback: "FluxBar — {{.Count}} unread article".to_string(),
+                other_fallback: "FluxBar — {{.Count}} unread articles".to_string(),
+                count: 2,
+            },
+            &runtime,
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.text, "FluxBar — 2 ungelesene Artikel");
     }
 
     #[test]

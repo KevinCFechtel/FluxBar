@@ -180,6 +180,18 @@ entities, Unicode, whitespace normalization, truncation, malformed HTML,
 inline images, relative/absolute/invalid URLs, lazy/responsive attributes,
 tiny-image skip, and image-enclosure fallback.
 
+Phase 9.2 localization validation uses:
+
+``` sh
+Build/test-localization-compat.sh
+```
+
+A shared JSON fixture feeds identical locale preferences, keys, fallbacks,
+and plural counts to the Go and Rust localization implementations. The
+harness compares the returned text exactly. Fixtures cover English and German
+text lookup, unsupported-locale fallback, unknown-key fallback, empty locale
+preferences, English and German plural forms, and fallback plural rendering.
+
 The SQLite suite also creates pending read/star and Undo state in each
 implementation and has the other implementation continue it. Timer unit tests
 use a narrowly injected short automatic delay instead of repeatedly sleeping

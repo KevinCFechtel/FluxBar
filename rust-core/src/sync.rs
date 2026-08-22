@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use crate::domain::navigation::build_navigation;
 use crate::domain::selection::Selection;
+use crate::icons::IconService;
 use crate::persistence::{MutationReceipt, SnapshotData, Store};
 use crate::remote::miniflux::{BROWSE_PAGE_SIZE, FILTER_ONLY_STARRED, STATUS_READ, STATUS_UNREAD};
 use crate::remote::{EntriesFilter, RemoteInbox, dto_mapping_inputs, entry_to_domain};
@@ -13,12 +14,14 @@ use crate::remote::{EntriesFilter, RemoteInbox, dto_mapping_inputs, entry_to_dom
 pub const AUTOMATIC_FLUSH_DELAY: Duration = Duration::from_secs(10);
 pub const REFRESH_DEADLINE: Duration = Duration::from_secs(45);
 pub const FLUSH_DEADLINE: Duration = Duration::from_secs(30);
+pub const ICON_DEADLINE: Duration = Duration::from_secs(15);
 
 struct Inner {
     store: Store,
     remote: Box<dyn RemoteInbox>,
     account_id: String,
     newest_first: bool,
+    icon_service: IconService,
 }
 
 #[derive(Default)]
@@ -60,6 +63,7 @@ impl SyncService {
                 remote,
                 account_id,
                 newest_first,
+                icon_service: IconService::new(),
             }),
             scheduler: Scheduler::default(),
             automatic_flush_delay: AUTOMATIC_FLUSH_DELAY,
@@ -108,6 +112,16 @@ impl SyncService {
         let result = flush_pending(&mut inner);
         inner.remote.set_operation_deadline(None);
         result
+    }
+
+    pub fn feed_icon(&self, feed_id: i64) -> crate::icons::CachedIcon {
+        let inner = locked(&self.inner);
+        inner
+            .remote
+            .set_operation_deadline(Some(Instant::now() + ICON_DEADLINE));
+        let icon = inner.icon_service.feed_icon(feed_id, inner.remote.as_ref());
+        inner.remote.set_operation_deadline(None);
+        icon
     }
 
     /*

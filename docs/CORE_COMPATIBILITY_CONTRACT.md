@@ -524,6 +524,7 @@ no catalog match exists.
 -   go-core/internal/coreapi/api.go case "localize"
 -   go-core/internal/localization/localization.go
 -   go-core/internal/coreapi/api_test.go TestLocalizeRequest
+-   Build/test-localization-compat.sh (Phase 9.2 differential harness)
 
 ### localize_plural
 
@@ -559,6 +560,7 @@ no catalog match exists.
 
 -   go-core/internal/coreapi/api.go case "localize_plural"
 -   go-core/internal/localization/localization.go
+-   Build/test-localization-compat.sh (Phase 9.2 differential harness)
 
 ### Unknown operations
 
@@ -996,10 +998,6 @@ must not retain the input pointer, and must not panic.
 -   What should Rust return when the input C string is not valid UTF-8?
     Go silently uses C.GoString behavior. A deterministic Rust choice
     should be documented and tested.
--   Should the Rust skeleton and early phases also localize validation
-    errors with the same go-i18n catalog, or return stable English strings
-    until Phase 9? The contract currently requires preserving behavior,
-    which implies eventual localization parity.
 -   How should Rust handle configure when the same account ID already
     exists with a different server? The Go code updates the server column
     via ON CONFLICT DO UPDATE.

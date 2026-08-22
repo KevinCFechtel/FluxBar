@@ -404,6 +404,31 @@ Differential coverage:
     fake Miniflux entries and compares persisted `preview`/`image_url` values
     together with snapshots and request sequences.
 
+### Phase 9.2 --- Localization
+
+Implemented in `rust-core/src/localization.rs`:
+
+-   Embeds the same English and German translation JSON files used by the Go
+    core via `include_str!`, so Rust and Go share a single source of truth for
+    catalog content.
+-   BCP-47 locale negotiation with English fallback, matching Go's
+    `localization.New` behavior for the supported locales. The primary language
+    subtag is used; unsupported locales fall back to English.
+-   Simple message lookup with caller-supplied fallback (`text`).
+-   Plural message lookup using `one`/`other` forms and `{{.Count}}` template
+    substitution, with caller fallbacks when the key is missing.
+-   `configure` validation errors are now localized; `validation.server_invalid`
+    and `validation.api_key_required` use the caller's preferred locale.
+-   Public `localize` and `localize_plural` handlers return the localized string
+    in the `text` response field, removing the last "not implemented" stubs.
+
+Differential coverage:
+
+-   `Build/test-localization-compat.sh` compares Go and Rust outputs for a
+    shared fixture set covering English and German text lookup, unsupported
+    locale fallback, unknown-key fallback, missing-locale fallback, English and
+    German plural forms, and fallback plural rendering.
+
 ## Phase 10 --- Full Rust-backed application validation
 
 Manually validate at least:

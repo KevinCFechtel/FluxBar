@@ -14,7 +14,7 @@ use crate::domain::selection::Selection;
 use crate::persistence::Store;
 use crate::remote::MinifluxClient;
 use crate::sync::{SyncResult, SyncService};
-use crate::transport::response::{BrowseSnapshot, Response};
+use crate::transport::response::{BrowseSnapshot, Icon, Response};
 
 struct Config {
     #[cfg_attr(not(test), allow(dead_code))]
@@ -65,8 +65,9 @@ impl AppRuntime {
         api_key: &str,
         newest_first: bool,
         generation: i64,
+        locales: &[String],
     ) -> Response {
-        let normalized_server = match validate_configuration(server, api_key) {
+        let normalized_server = match validate_configuration(server, api_key, locales) {
             Ok(server) => server,
             Err(message) => return Response::error(message),
         };
@@ -261,6 +262,21 @@ impl AppRuntime {
         }
     }
 
+    pub fn feed_icon(&self, feed_id: i64) -> Response {
+        let Some(engine) = self.current_engine() else {
+            return Response::not_configured();
+        };
+        let icon = engine.feed_icon(feed_id);
+        Response {
+            ok: true,
+            icon: Some(Icon {
+                regular: icon.regular,
+                dark: icon.dark,
+            }),
+            ..Response::default()
+        }
+    }
+
     fn current_engine(&self) -> Option<std::sync::Arc<SyncService>> {
         locked(&self.session)
             .as_ref()
@@ -285,15 +301,27 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Same validation rules and fallback strings as Go's `validateConfiguration`
-/// when no localization catalog matches.
-fn validate_configuration(server: &str, api_key: &str) -> Result<String, String> {
+/// Same validation rules as Go's `validateConfiguration`. Error messages are
+/// localized using the caller's preferred locales, falling back to English
+/// when no supported locale matches.
+fn validate_configuration(
+    server: &str,
+    api_key: &str,
+    locales: &[String],
+) -> Result<String, String> {
+    let localizer = crate::localization::Localizer::new(locales);
     let trimmed = server.trim().trim_end_matches('/');
     if !has_http_host(trimmed) {
-        return Err("The server URL must be a complete HTTP or HTTPS URL.".to_string());
+        return Err(localizer.text(
+            "validation.server_invalid",
+            "The server URL must be a complete HTTP or HTTPS URL.",
+        ));
     }
     if api_key.trim().is_empty() {
-        return Err("Please enter a Miniflux API key.".to_string());
+        return Err(localizer.text(
+            "validation.api_key_required",
+            "Please enter a Miniflux API key.",
+        ));
     }
     Ok(trimmed.to_string())
 }
@@ -367,20 +395,32 @@ mod tests {
     #[test]
     fn validation_matches_go_fallback_messages() {
         assert_eq!(
-            validate_configuration("not-a-url", "secret"),
+            validate_configuration("not-a-url", "secret", &[]),
             Err("The server URL must be a complete HTTP or HTTPS URL.".to_string())
         );
         assert_eq!(
-            validate_configuration("https://miniflux.example", "  "),
+            validate_configuration("https://miniflux.example", "  ", &[]),
             Err("Please enter a Miniflux API key.".to_string())
         );
         assert_eq!(
-            validate_configuration(" https://m.example/ ", " k ").as_deref(),
+            validate_configuration(" https://m.example/ ", " k ", &[]).as_deref(),
             Ok("https://m.example")
         );
-        assert!(validate_configuration("HTTPS://M.EXAMPLE", "k").is_ok());
-        assert!(validate_configuration("http://", "k").is_err());
-        assert!(validate_configuration("ftp://m.example", "k").is_err());
+        assert!(validate_configuration("HTTPS://M.EXAMPLE", "k", &[]).is_ok());
+        assert!(validate_configuration("http://", "k", &[]).is_err());
+        assert!(validate_configuration("ftp://m.example", "k", &[]).is_err());
+    }
+
+    #[test]
+    fn validation_uses_localized_errors() {
+        assert_eq!(
+            validate_configuration("not-a-url", "secret", &["de-DE".to_string()]),
+            Err("Die Server-URL muss eine vollständige HTTP- oder HTTPS-URL sein.".to_string())
+        );
+        assert_eq!(
+            validate_configuration("https://miniflux.example", "  ", &["de-DE".to_string()]),
+            Err("Bitte einen Miniflux-API-Key eingeben.".to_string())
+        );
     }
 
     #[test]
@@ -388,14 +428,22 @@ mod tests {
         let directory = test_directory();
         let runtime = AppRuntime::with_database_path(directory.path().join("inbox.sqlite3"));
 
-        assert!(runtime.configure("https://a.example", "k1", false, 5).ok);
+        assert!(
+            runtime
+                .configure("https://a.example", "k1", false, 5, &[])
+                .ok
+        );
         let first_account = {
             let guard = locked(&runtime.session);
             guard.as_ref().unwrap().config.account_id.clone()
         };
 
         // Older generation must not replace the configured account.
-        assert!(runtime.configure("https://b.example", "k2", true, 4).ok);
+        assert!(
+            runtime
+                .configure("https://b.example", "k2", true, 4, &[])
+                .ok
+        );
         let unchanged = {
             let guard = locked(&runtime.session);
             guard.as_ref().unwrap().config.account_id.clone()
@@ -403,7 +451,11 @@ mod tests {
         assert_eq!(first_account, unchanged);
 
         // Equal or newer generations replace it (Go uses >=).
-        assert!(runtime.configure("https://c.example", "k3", false, 5).ok);
+        assert!(
+            runtime
+                .configure("https://c.example", "k3", false, 5, &[])
+                .ok
+        );
         let replaced = {
             let guard = locked(&runtime.session);
             guard.as_ref().unwrap().config.account_id.clone()
