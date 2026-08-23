@@ -7,6 +7,10 @@ interchangeable implementation before considering removal of Go.
 
 This is a compatibility migration first.
 
+Phases 0-11 below record that compatibility migration. The post-FluxBar plan is
+now maintained in `SHARED_RUST_CORE_ROADMAP.md`; it supersedes the former linear
+Phase 12-15 assumptions without changing the completed compatibility contract.
+
 The existing FluxBar product architecture, native macOS UI, local-first
 SQLite behavior, Miniflux semantics, scrollover behavior, release model,
 and documented product boundaries remain authoritative.
@@ -571,62 +575,47 @@ does not alter the Go-backed release path, and does not remove Go.
 to Rust. `Build/build.sh` and `Build/build-core.sh` now default to Rust when
 `FLUX_CORE` is unset; valid values remain `rust` and `go`, with an explicit
 error for any other value. `FLUX_CORE=rust` and `FLUX_CORE=go` both work;
-`Build/release-go.sh` remains explicitly Go-backed so signed releases stay
-pinned to the proven core.
+`Build/release-go.sh` remains explicitly Go-backed as an engineering fallback.
 
 This switch affects only the default developer/local build path. Go remains
-the production/reference implementation and the fallback for regression
-isolation. No Go code was removed or deprecated, the SQLite schema was not
-changed, and no new bridge/dependency was introduced.
+the reference implementation and fallback for regression isolation. At the
+time of this phase no Go code was removed or deprecated, the SQLite schema was
+not changed, and no new bridge/dependency was introduced. The later deprecation
+policy is recorded under Former Phase 13 below.
 
-## Phase 12 --- Proving releases
+## Former Phase 12 --- Proving releases
 
-Ship Rust-backed releases while retaining Go for regression isolation.
+**Decision: SHORTEN AND MERGE.** FluxBar has no public Go-backed installed
+base, so a traditional multi-release Go-to-Rust user migration is unnecessary.
+The remaining live configuration, offline, scheduling, restart-persistence,
+signing, notarization, linkage, and launch checks become Phase 0 of
+`SHARED_RUST_CORE_ROADMAP.md`. Meaningful product testing remains required.
 
-A parallel signed/notarized Rust release-candidate script,
-`Build/release-rust.sh`, is available for realistic local testing. It uses
-the same signing identity, hardened runtime, notarization process,
-versioning, packaging, and validation as `Build/release-go.sh`. The
-artifact filename includes `-rust` to avoid overwriting the Go reference
-release; the app bundle name and identifier remain unchanged.
+The former requirement for at least two Rust releases before any subsequent
+work is removed. A post-release observation period may still inform eventual Go
+removal, but it does not block shared-core or native-prototype work.
 
-Suggested removal gate:
+## Former Phase 13 --- Remove Go
 
--   at least two stable Rust-backed releases;
--   no known data compatibility regression;
--   no unresolved sync semantic difference;
--   signing/notarization/distribution remains stable.
+**Decision: MOVE LATER.** Go is now deprecated for future feature development,
+but remains the compatibility/reference implementation, differential-test
+oracle, and explicit temporary fallback. Do not remove it until the fixture and
+maintenance-value gate in `SHARED_RUST_CORE_ROADMAP.md` is met.
 
-## Phase 13 --- Remove Go
+## Former Phase 14 --- Evaluate UniFFI separately
 
-Only after the proving gate.
+**Decision: MOVE AND REFRAME.** The mobile binding decision follows mobile
+runtime proof and a working repository/sync/mutation slice. It compares C/JSON,
+a typed C ABI, and UniFFI using measured Swift/Kotlin evidence. It is independent
+from Go removal, and the FluxBar C/JSON ABI remains stable.
 
-Then remove Go-specific source/build/module material that is no longer
-needed and update current-state documentation.
+## Former Phase 15 --- Expand toward a reusable Flux core
 
-## Phase 14 --- Evaluate UniFFI separately
-
-After Rust is stable, prototype a typed adapter and compare:
-
--   Swift ergonomics;
--   future Kotlin/Android ergonomics;
--   typed errors;
--   async/callback support;
--   packaging complexity;
--   debugging;
--   binary/API stability.
-
-C/JSON may remain a valid adapter even if UniFFI is added.
-
-## Phase 15 --- Expand toward a reusable Flux core
-
-Only after FluxBar proves the Rust architecture should the core gain
-additional domain capabilities needed by FluxNews.
-
-Do not add FluxNews UI concepts. Add portable domain capabilities.
-
-Consider a separate core repository when the API is stable and a second
-real consumer exists.
+**Decision: REPLACED BY DEPENDENCY-DRIVEN PHASES.** The source-backed inventory
+is `FLUXNEWS_CORE_GAP_ANALYSIS.md`; the implementation sequence and native
+ownership boundaries are `SHARED_RUST_CORE_ROADMAP.md`. Do not add FluxNews UI
+or OS integration to Rust, and do not turn the FluxBar schema/snapshot into the
+mobile repository contract.
 
 ## Model/agent guidance
 

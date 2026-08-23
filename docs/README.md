@@ -24,7 +24,7 @@ documented here.
 -   `features/PODCASTS.md` --- desktop podcast playback and Now Playing.
 -   `features/NOTIFICATIONS.md` --- selective notification behavior.
 
-## Active Core Migration
+## Core Migration and Shared-Core Planning
 
 -   `RUST_CORE_MIGRATION.md` --- staged Go-to-Rust migration, scope
     gates, and rollout/removal criteria.
@@ -32,6 +32,10 @@ documented here.
     behavior Rust must reproduce.
 -   `RUST_CORE_TESTING.md` --- Rust, ABI, differential, database, and
     integration testing strategy.
+-   `FLUXNEWS_CORE_GAP_ANALYSIS.md` --- source-backed inventory of current
+    Rust coverage and FluxNews responsibilities.
+-   `SHARED_RUST_CORE_ROADMAP.md` --- post-FluxBar shared-core, native-client,
+    binding, persistence, and Flutter migration execution plan.
 
 Read these only for core migration work or when changing the shared core
 boundary.
@@ -50,8 +54,8 @@ boundary.
 4.  Read `ARCHITECTURE_DECISIONS.md` before changing core/platform
     boundaries, sync, persistence, automatic state mutation, or media
     behavior.
-5.  For Go-to-Rust work, additionally read the three Active Core
-    Migration documents above.
+5.  For Go-to-Rust work, read the compatibility migration documents. For
+    shared-core or native FluxNews work, also read the GAP analysis and roadmap.
 6.  Read release/backlog documents only when the task involves them.
 
 Do not load all context files by default.

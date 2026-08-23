@@ -15,12 +15,12 @@ selections are fully paginated in 200-entry pages before negative
 reconciliation. The local popover snapshot remains capped at 200 rows
 for responsive presentation.
 
-During the staged Rust migration, Go remains the production/reference owner.
-The experimental Rust core now reproduces local snapshots, Miniflux remote
-behavior, refresh/reconciliation, effective versus remote state, durable
-pending read/star mutations, successful-prefix flush, Undo/discard, the
+Rust is the normal FluxBar development core and reproduces local snapshots,
+Miniflux remote behavior, refresh/reconciliation, effective versus remote state,
+durable pending read/star mutations, successful-prefix flush, Undo/discard, the
 10-second automatic-read delay, article preview/image extraction, localization,
-and feed-icon processing/cache.
+and feed-icon processing/cache. Go is deprecated for future development but
+remains the compatibility/reference implementation and explicit fallback.
 Differential tests compare JSON, database state, pending/Undo rows, fake
 remote requests, and processed article fields. Automated Rust tests use
 temporary databases and fake credentials and never open the user's production

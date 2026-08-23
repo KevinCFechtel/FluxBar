@@ -374,15 +374,22 @@ When Go and Rust disagree, record:
 
 Do not silently change the compatibility contract.
 
-## Rust-default gate
+## Rust-default decision (completed)
 
-Rust must not become the normal core until:
+The original gate included manual product smoke scenarios. Phase 10.2
+explicitly reclassified the still-outstanding live configuration, offline,
+startup scheduling, and restart-persistence checks as pre-1.0 hardening rather
+than development-default blockers. Phase 11 completed the development-default
+decision on 2026-08-23 based on:
 
 -   relevant Rust tests pass;
 -   existing Go tests pass;
 -   ABI/contract tests pass;
 -   relevant differential tests pass;
 -   native macOS build succeeds;
--   manual smoke tests succeed.
+-   automated native build and launch smoke tests succeed.
 
-Go must not be deleted merely because Rust becomes the default.
+The remaining manual live-product scenarios are required by Phase 0 of
+`SHARED_RUST_CORE_ROADMAP.md` before first-public-release readiness. Go must not
+be deleted merely because Rust is the default; its deprecation and removal
+criteria are defined in that roadmap.

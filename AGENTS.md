@@ -80,9 +80,9 @@ triage tool, not a traditional full desktop RSS reader.
 -   The UI should be native to each platform. Do not compromise macOS UX
     for future Windows/Linux UI reuse.
 -   Platform-independent business logic belongs in the portable core.
-    The existing Go core is the current production/reference
-    implementation; the Rust core is being developed in parallel as its
-    intended replacement.
+    Rust is the default implementation and future shared core. The existing Go
+    core is deprecated for future development but remains a behavioral
+    reference and explicit temporary fallback.
 -   Platform-specific presentation and OS integration belong in the
     native UI layer.
 -   Swipe gestures are optional accelerators; no important action may
@@ -211,7 +211,8 @@ FluxBar is incrementally migrating the portable core from Go to Rust.
 
 During this migration:
 
--   The existing Go core is the behavioral reference implementation.
+-   The existing Go core is the deprecated behavioral reference
+    implementation.
 -   Keep Go and Rust implementations side by side until Rust has proven
     compatible and stable.
 -   Compatibility comes before redesign. Do not silently fix unusual Go
@@ -226,9 +227,9 @@ During this migration:
     share more code.
 -   Keep FFI concerns at the outer adapter boundary. Domain code must
     not depend on raw C pointers, Swift, AppKit, or SwiftUI.
--   Rust is now the default core for normal development/local builds; the
-    Go core remains the production/reference implementation and explicit
-    fallback.
+-   Rust is now the default core for normal development/local builds and the
+    first-public-release candidate; Go remains the reference implementation and
+    explicit fallback.
 -   Do not advance into a later migration phase unless the task requests
     it.
 

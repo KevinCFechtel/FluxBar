@@ -15,11 +15,12 @@ played directly in FluxBar with synchronized playback position.
 
 ## Current Implementation Status
 
-The current macOS implementation provides a native Menu Bar item and
-popover backed by Miniflux through the Go core. The Go core persists
-inbox state and desired read/star mutations in SQLite. Native views load
-the selected local snapshot first. While the popover is visible,
-Miniflux inbox refreshes are explicit user actions.
+The current macOS implementation provides a native Menu Bar item and popover
+backed by Miniflux through the Rust core. Rust is the normal development core
+and persists inbox state and desired read/star mutations in SQLite. Go remains
+a deprecated reference/fallback. Native views load the selected local snapshot
+first. While the popover is visible, Miniflux inbox refreshes are explicit user
+actions.
 
 Automatic Mark as Read on Scrollover, transient Undo,
 startup/stale-close sync, a hidden-popover 15-minute sync interval,
@@ -33,7 +34,7 @@ remain target functionality.
                          Miniflux
                             │
                             ▼
-                         Go Core
+                        Rust Core
              ┌──────────────┼──────────────┐
              │              │              │
            Models          Sync         Storage
@@ -68,9 +69,10 @@ articles, read/unread state, starred state, and relevant feed metadata.
 
 ### Portable Core
 
-The current Go core owns platform-independent behavior where practical,
+The current Rust core owns platform-independent behavior where practical,
 including Miniflux communication, synchronization/business rules, shared
-models, filtering semantics, state operations, and shared media logic.
+models, filtering semantics, and state operations. Go remains the behavioral
+reference for the completed FluxBar compatibility migration.
 
 The native macOS layer should not duplicate business rules merely for UI
 convenience.
@@ -116,10 +118,11 @@ The podcast mini player is planned rather than implemented.
 
 ### Native Core Bridge
 
-The macOS application currently links the Go core as a C archive. The
-native layer sends JSON requests across a small C ABI and explicitly
-releases response strings allocated by Go. Browse data is returned as a
-versioned JSON snapshot; the current snapshot schema is version 1.
+The macOS application links an implementation-neutral C archive and defaults to
+the Rust implementation. The native layer sends JSON requests across a small C
+ABI and explicitly releases core-allocated response strings. Browse data is
+returned as a versioned JSON snapshot; the current snapshot schema is version
+1. Explicit Go builds use the same artifact and ABI contract.
 
 The bridge currently supports configuration, refresh, read/star
 mutations, feed icons, and localization. Snapshot-version compatibility
@@ -139,66 +142,42 @@ Podcast enclosures are planned to play directly inside FluxBar. The
 future player should synchronize position and integrate with macOS Now
 Playing.
 
-## Active Core Migration
+## Shared Core Direction
 
-The intended migration keeps the native macOS architecture stable while
-a Rust core is developed beside the Go core.
+The FluxBar compatibility migration is complete through the Rust development-
+default phase. The stable macOS architecture remains:
 
 ``` text
                      Native macOS client
-                            │
+                            |
                      stable C/JSON bridge
-                      ┌─────┴─────┐
-                      │           │
-                   Go core     Rust core
-                  reference    candidate
-                      │           │
-                      └─────┬─────┘
-                            │
-                 equivalent product semantics
+                            |
+                    Rust core (default)
+                            |
+                 FluxBar compatibility store
 ```
 
-The Rust implementation is not a second product architecture. It should
-eventually replace Go behind the same product boundary.
+The Xcode target links `libfluxcore.a` / `libfluxcore.h`. `FLUX_CORE=rust` (or
+unset) selects Rust; `FLUX_CORE=go` selects the deprecated reference/fallback.
+The Rust core implements all 11 FluxBar operations. Its state-scoped
+concurrency permits local snapshots and optimistic mutations while remote or
+icon work is blocked.
 
-The Xcode target links an implementation-neutral artifact contract
-(`libfluxcore.a` / `libfluxcore.h`) produced by a build-phase script.
-The script dispatches to the Go or Rust core based on the `FLUX_CORE`
-environment variable. `FLUX_CORE=go` (or unset) is the default;
-`FLUX_CORE=rust` is an experimental compatibility candidate.
-
-The Rust core implements all 11 current public operations behind the existing
-C/JSON boundary, including SQLite, Miniflux sync/reconciliation, mutations,
-Undo, article processing, localization, and feed-icon processing/cache.
-Phase 10 adversarial differential testing substantially expanded transport,
-sequence, restart, account-isolation, snapshot-boundary, parser, localization,
-and icon coverage.
-
-Rust remains experimental and Go remains the default/reference. Phase 10.1
-removed the broad Rust service mutex. Each retained account service now has a
-deadline-aware refresh/flush serial gate and independent icon
-cache/single-flight and delayed-worker state. Retained services share one
-runtime-wide, deadline-aware SQLite connection. Local snapshots and optimistic
-mutations can therefore proceed while remote or icon work is blocked.
-Reconfiguration publishes a new service only for an account change;
-same-account configuration and account round trips reuse any still-live
-account service through a weak registry. In-flight and delayed work retaining
-an old account service cannot switch to the replacement account or race a
-second gate for their original account. Phase 10.2 independently re-checked
-this model and approved Rust for the next, explicit development-default phase.
-The current build and release defaults remain unchanged until that phase is
-performed.
-
-Initial migration constraints:
+Future native FluxNews clients will use additional mobile services around the
+same Rust foundation without inheriting FluxBar's 200-row snapshot or
+unversioned compatibility schema. The durable constraints are:
 
 -   preserve the existing bridge and JSON behavior;
--   preserve SQLite compatibility;
+-   preserve FluxBar SQLite compatibility;
 -   keep platform UI/OS integration native;
--   keep Go available as reference and fallback;
--   defer UniFFI and broader API redesign until behavioral parity
-    exists.
+-   keep Go available as deprecated reference/fallback for now;
+-   validate mobile runtime and API requirements before selecting UniFFI or
+    another mobile adapter; and
+-   use a separate versioned mobile persistence profile for FluxNews.
 
-See `RUST_CORE_MIGRATION.md` for migration phases.
+See `RUST_CORE_MIGRATION.md` for the completed compatibility phases,
+`FLUXNEWS_CORE_GAP_ANALYSIS.md` for the source inventory, and
+`SHARED_RUST_CORE_ROADMAP.md` for the post-FluxBar execution plan.
 
 ## Data Flow: App Open / Popover Open
 
@@ -314,3 +293,4 @@ Sidebar / Spotlight / App Intent / future notification
 -   podcast/audio → `features/PODCASTS.md`
 -   notifications → `features/NOTIFICATIONS.md`
 -   architecture-sensitive work → `ARCHITECTURE_DECISIONS.md`
+-   shared Rust core/native FluxNews roadmap → `SHARED_RUST_CORE_ROADMAP.md`

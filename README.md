@@ -20,8 +20,8 @@ The project is released under the BSD 3-Clause License. Contributions, bug repor
 ## Requirements
 
 - macOS 15 or later
-- Go 1.25.1 or later
-- Rust (for experimental Rust core builds)
+- Rust
+- Go 1.25.1 or later (currently also used by shared build/release scripts)
 - Xcode Command Line Tools
 - An accessible Miniflux instance with an API key
 
@@ -38,13 +38,15 @@ The default developer build uses the Rust core, which is now the normal developm
 FLUX_CORE=rust ./Build/build.sh # explicit Rust core
 ```
 
-The Go core remains available as the explicit production/reference fallback:
+The deprecated Go core remains available as an explicit reference/fallback:
 
 ```bash
 FLUX_CORE=go ./Build/build.sh  # explicit Go core
 ```
 
-Go remains the release-pinned production core (`Build/release-go.sh`). Rust is the default for normal development and local builds after Phase 10.2.
+Rust is the first-public-release candidate. `Build/release-go.sh` remains an
+explicit Go-backed engineering fallback; FluxBar has no public Go-backed
+installed base to migrate.
 
 Both build paths produce `dist/FluxBar.app`. On first launch, enter the Miniflux URL and API key through “Settings…” in the menu. Credentials do not need to be stored in the source code or any build files.
 
@@ -55,18 +57,21 @@ A signed and notarized release requires an Apple Developer ID and a `notarytool`
 ```bash
 xcrun notarytool store-credentials FluxBar-notary
 cp Build/.env.example Build/.env
-./Build/release-go.sh
+./Build/release-rust.sh
 ```
 
 `Build/.env` is ignored by Git. The completed archive is written to `dist/release/`.
 
-A parallel Rust-backed signed release candidate is available for testing:
+An explicit Go-backed signed fallback remains available for regression
+isolation:
 
 ```bash
-./Build/release-rust.sh
+./Build/release-go.sh
 ```
 
-It uses the same signing identity, hardened runtime, notarization, and artifact layout as `release-go.sh`, but builds the Rust-backed app. The bundle name, identifier, and signing configuration remain identical to the Go release path.
+Both scripts use the same signing identity, hardened runtime, notarization, and
+artifact layout. The bundle name, identifier, and signing configuration remain
+identical.
 
 ## Development
 

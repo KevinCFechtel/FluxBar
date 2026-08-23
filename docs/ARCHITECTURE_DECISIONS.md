@@ -40,9 +40,9 @@ not required to follow the browser-first article rule.
 
 Platform-independent Miniflux, sync, state, filtering, and reusable
 media/business behavior belongs in the portable core where practical.
-The existing Go core is the current production/reference implementation.
-A Rust implementation is being developed in parallel as its intended
-replacement.
+Rust is the default implementation and future shared core. The existing Go
+core is deprecated for future development but remains a behavioral reference
+and explicit temporary fallback.
 
 Do not duplicate business rules in SwiftUI merely because the UI needs
 them. The language migration must preserve this boundary rather than
@@ -243,12 +243,14 @@ macOS native client
      Go  Rust
 ```
 
-The Go implementation remains the reference until Rust compatibility is
-proven. During the parallel period the developer build supports both
-cores through `FLUX_CORE=go` (default) and `FLUX_CORE=rust`, while
-Xcode consumes the same `libfluxcore.a` / `libfluxcore.h` artifact
-contract regardless of implementation. Language migration must not be
-combined with unrelated feature, database, UI, or product redesign.
+The Go implementation remains the behavioral reference/fallback while it is
+retained. The developer build supports both cores through `FLUX_CORE=rust`
+(default) and `FLUX_CORE=go`, while Xcode consumes the same
+`libfluxcore.a` / `libfluxcore.h` artifact contract regardless of
+implementation. Go is deprecated for future feature development. The completed
+compatibility implementation through the development-default phase must not be
+retroactively combined with unrelated feature, database, UI, or product
+redesign.
 
 Rust persistence must use the existing unversioned SQLite schema rather than
 introducing a Rust-specific database or migration version. The portable store
@@ -278,6 +280,7 @@ Delayed work may retain its original account service after reconfiguration,
 but can never use the replacement account's store or remote client. Pending
 revision acknowledgement must preserve a newer concurrent local value.
 
-After Rust is stable, a typed binding layer such as UniFFI may be
-evaluated separately. That later adapter decision must not leak FFI
-concerns into the Rust domain model.
+After mobile runtime and API behavior are characterized, C/JSON, a typed C ABI,
+and UniFFI may be evaluated as mobile adapters. That decision is independent
+from the stable FluxBar C/JSON API and must not leak FFI concerns into the Rust
+domain model. See `SHARED_RUST_CORE_ROADMAP.md`.

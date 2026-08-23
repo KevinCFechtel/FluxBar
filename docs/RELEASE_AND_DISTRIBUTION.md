@@ -26,25 +26,27 @@ it for development-default use.
 
 `Build/build-go.sh` compiles and links the Go core from `go-core/` as a
 C archive, copies `FluxBar.app` to `dist`, and applies an ad-hoc signature
-for local execution. Go remains the explicit production/reference core and
-the pinned fallback: `FLUX_CORE=go ./Build/build.sh` still works, and
+for local execution. Go is deprecated for future development but remains the
+explicit reference/fallback: `FLUX_CORE=go ./Build/build.sh` still works, and
 `Build/release-go.sh` continues to build with Go.
 
-`Build/release-go.sh` implements the direct-distribution path for the
-Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It
+`Build/release-go.sh` implements an explicit fallback direct-distribution path
+for the Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It
 verifies the signature, notarization ticket, Gatekeeper assessment, and
-re-extracted final artifact. The release path is intentionally pinned to
-Go so that a Rust default change in development cannot leak into signed
-releases.
+re-extracted final artifact. The script remains intentionally pinned to Go.
 
-`Build/release-rust.sh` is a parallel signed/notarized release script that
+`Build/release-rust.sh` is a signed/notarized release script that
 builds the Rust-backed app using the same signing identity, hardened
 runtime, notarization mechanism, versioning, packaging, and validation
 sequence as `release-go.sh`. It produces a `-rust.zip` artifact to avoid
 overwriting the Go release archive, while the app bundle inside remains
-`FluxBar.app` with the same bundle identifier. It is intended for Rust
-release-candidate testing and does not replace the Go reference release
-path.
+`FluxBar.app` with the same bundle identifier. It is the first-public-release
+candidate path; this documentation change does not rename either script or
+change their explicit core selection.
+
+FluxBar has no public Go-backed installed base. A clean Rust-backed first public
+release does not require a Go-to-Rust user-data migration. Go/Rust database
+interoperability remains reference/regression coverage.
 
 DMG packaging, universal release artifacts, Mac App Store packaging,
 Homebrew publication, and release CI remain future work.
@@ -116,15 +118,13 @@ and CI details should be added only when established in the repository.
 
 ## Core Migration and Release Safety
 
-During the Go-to-Rust compatibility migration, the established
-production release path remains Go-backed unless a migration phase
-explicitly changes the default.
+The FluxBar compatibility migration has reached Rust-default development and a
+signed/notarized Rust release-candidate path. `Build/build.sh` remains a
+developer selector, not a release script.
 
-`Build/build.sh` is a developer build selector; it is not a release
-script. `Build/release-go.sh` remains the current production release
-path and calls `Build/build-go.sh` with `FLUX_CORE=go` explicitly. An inherited
-developer-shell value such as `FLUX_CORE=rust` cannot select Rust for this
-release path.
+`Build/release-go.sh` calls `Build/build-go.sh` with `FLUX_CORE=go` explicitly.
+An inherited developer-shell value such as `FLUX_CORE=rust` cannot select Rust
+for this fallback path.
 
 `Build/release-rust.sh` is the parallel Rust release-candidate path and
 calls `Build/build-rust.sh` with `FLUX_CORE=rust` explicitly. An inherited
@@ -136,6 +136,6 @@ notarization mechanism, archive layout, and validation sequence. Rust must
 not silently alter signing, notarization, archive layout, release
 automation, or distribution channels.
 
-When Rust eventually becomes the default core, keep an explicit
-Go-backed fallback build for the proving period described in
-`RUST_CORE_MIGRATION.md`.
+Keep the explicit Go-backed fallback while it remains useful as a regression
+oracle. Go deprecation and removal criteria, and the shortened first-release
+proving phase, are defined in `SHARED_RUST_CORE_ROADMAP.md`.

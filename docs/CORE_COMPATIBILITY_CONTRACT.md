@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This is the migration contract between the current Go core and the parallel
-Rust implementation.
+This is the preserved compatibility contract between the Go reference core and
+the Rust implementation now used by default for FluxBar development.
 
 The repository's existing Go implementation is authoritative where this
 document is incomplete. Update this document from inspected code before
@@ -19,11 +19,12 @@ This contract supplements, rather than replaces:
 
 ## Current native boundary
 
-FluxBar Desktop currently links the Go core as a C archive. The native
-client exchanges JSON through a narrow C ABI and explicitly releases
-core-allocated response strings.
+FluxBar Desktop can link either core as a C archive and defaults to Rust for
+normal development builds. The native client exchanges JSON through a narrow C
+ABI and explicitly releases core-allocated response strings. Go remains a
+deprecated reference/fallback, not a public installed-base migration source.
 
-The initial Rust core must preserve the callable behavior of:
+The Rust core preserves the callable behavior of:
 
 ``` c
 extern char* FluxCoreRequest(char* request);
