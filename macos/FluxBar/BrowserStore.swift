@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import OSLog
 
 struct AutomaticReadUndo: Equatable {
     let id: String
@@ -22,7 +23,8 @@ enum ArticleListStyle: String {
 final class BrowserStore: ObservableObject {
     private enum RefreshOrigin {
         case manual
-        case automatic
+        case startup
+        case background
     }
 
     private static let automaticReadUndoMinimumCount = 3
@@ -69,21 +71,25 @@ final class BrowserStore: ObservableObject {
     }
 
     func start() {
+        Logger.fluxBar.info("store starting")
         do {
             selection = selectionWithStoredFilter(.all)
             guard let credentials = try CredentialStore.load() else {
+                Logger.fluxBar.info("no credentials stored; opening settings")
                 showingSettings = true
                 return
             }
             self.credentials = credentials
             configure(credentials)
         } catch {
+            Logger.fluxBar.error("store startup failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
             showingSettings = true
         }
     }
 
     func save(credentials: MinifluxCredentials, launchAtLogin: Bool) {
+        Logger.fluxBar.info("configure requested")
         resetListPresentation()
         retainedEntryIDs.removeAll()
         coreConfigured = false
@@ -94,6 +100,7 @@ final class BrowserStore: ObservableObject {
             do {
                 try await configureCore(credentials, generation: configuration)
                 guard configuration == configurationGeneration else { return }
+                Logger.fluxBar.info("configure completed")
                 try CredentialStore.setLaunchAtLogin(launchAtLogin)
                 try CredentialStore.save(credentials)
                 self.credentials = credentials
@@ -103,6 +110,7 @@ final class BrowserStore: ObservableObject {
                 resumeAfterConfiguration()
             } catch {
                 guard configuration == configurationGeneration else { return }
+                Logger.fluxBar.error("configure failed: \(error.localizedDescription)")
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -110,6 +118,7 @@ final class BrowserStore: ObservableObject {
     }
 
     func refresh() {
+        Logger.fluxBar.info("manual refresh requested")
         guard coreConfigured else {
             refreshWhenConfigured = true
             return
@@ -123,6 +132,7 @@ final class BrowserStore: ObservableObject {
         resetListPresentation()
         guard credentials != nil, !isPopoverVisible else { return }
         if let lastRefresh, Date().timeIntervalSince(lastRefresh) <= 60 { return }
+        Logger.fluxBar.info("background refresh requested")
         refreshInBackground()
     }
 
@@ -382,6 +392,7 @@ final class BrowserStore: ObservableObject {
     }
 
     private func configure(_ credentials: MinifluxCredentials) {
+        Logger.fluxBar.info("configure requested at startup")
         configurationGeneration += 1
         let configuration = configurationGeneration
         isLoading = true
@@ -389,11 +400,13 @@ final class BrowserStore: ObservableObject {
             do {
                 try await configureCore(credentials, generation: configuration)
                 guard configuration == configurationGeneration else { return }
+                Logger.fluxBar.info("configure completed at startup")
                 coreConfigured = true
                 startBackgroundSync()
                 resumeAfterConfiguration()
             } catch {
                 guard configuration == configurationGeneration else { return }
+                Logger.fluxBar.error("configure failed at startup: \(error.localizedDescription)")
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -441,7 +454,7 @@ final class BrowserStore: ObservableObject {
                 isNavigating = false
             }
             guard !isPopoverVisible else { return }
-            refresh(selection: selected, route: route, retainEntryIDs: Array(retainedEntryIDs), origin: .automatic)
+            refresh(selection: selected, route: route, retainEntryIDs: Array(retainedEntryIDs), origin: .startup)
         }
     }
 
@@ -451,6 +464,12 @@ final class BrowserStore: ObservableObject {
         retainEntryIDs: [Int64],
         origin: RefreshOrigin
     ) {
+        let reason = switch origin {
+        case .manual: "manual"
+        case .startup: "startup"
+        case .background: "background"
+        }
+        Logger.fluxBar.info("refresh requested reason=\(reason)")
         refreshGeneration += 1
         let refresh = refreshGeneration
         isLoading = true
@@ -465,6 +484,11 @@ final class BrowserStore: ObservableObject {
                 apply(response, structural: true)
                 if response.error == nil {
                     lastRefresh = Date()
+                    if let snapshot = response.snapshot {
+                        Logger.fluxBar.info("refresh completed entries=\(snapshot.entries.count) total=\(snapshot.total) unread=\(snapshot.unreadTotal) starred=\(snapshot.starredTotal)")
+                    } else {
+                        Logger.fluxBar.info("refresh completed without snapshot")
+                    }
                     if origin == .manual, isPopoverVisible {
                         manualRefreshScrollRequestID &+= 1
                         manualRefreshScrollRequest = ManualRefreshScrollRequest(
@@ -473,9 +497,12 @@ final class BrowserStore: ObservableObject {
                             firstEntryID: snapshot.entries.first?.id
                         )
                     }
+                } else {
+                    Logger.fluxBar.warning("refresh partial/error: \(response.error ?? "unknown")")
                 }
             } catch {
                 guard route == routeGeneration, refresh == refreshGeneration else { return }
+                Logger.fluxBar.error("refresh failed: \(error.localizedDescription)")
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
@@ -547,7 +574,7 @@ final class BrowserStore: ObservableObject {
             selection: selection,
             route: routeGeneration,
             retainEntryIDs: Array(retainedEntryIDs),
-            origin: .automatic
+            origin: .background
         )
     }
 

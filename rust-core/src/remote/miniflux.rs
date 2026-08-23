@@ -1,6 +1,6 @@
 //! Blocking Miniflux HTTP client reproducing the Go client's wire behavior.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::remote::RemoteInbox;
 use crate::remote::dto::{
@@ -73,6 +73,8 @@ impl MinifluxClient {
         body: Option<String>,
         operation_deadline: Option<std::time::Instant>,
     ) -> Result<String, RemoteError> {
+        log::info!(target: "http", "request started method={method} path={path}");
+        let start = Instant::now();
         let mut request = self
             .agent
             .request(method, &format!("{}{path}", self.endpoint))
@@ -82,6 +84,7 @@ impl MinifluxClient {
         if let Some(deadline) = operation_deadline {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
+                log::warn!(target: "http", "request aborted before send: context deadline exceeded method={method} path={path}");
                 return Err(RemoteError::Transport(
                     "context deadline exceeded".to_string(),
                 ));
@@ -96,16 +99,31 @@ impl MinifluxClient {
             Some(payload) => request.send_string(&payload),
             None => request.call(),
         };
-        let response = result.map_err(|error| match error {
-            ureq::Error::Status(_code, response) => map_error_response(response),
-            _ if operation_deadline
-                .is_some_and(|deadline| std::time::Instant::now() >= deadline) =>
-            {
-                RemoteError::Transport("context deadline exceeded".to_string())
-            }
-            other => RemoteError::Transport(other.to_string()),
+        let elapsed = start.elapsed().as_millis();
+        let response = result.map_err(|error| {
+            let remote_error = match error {
+                ureq::Error::Status(_code, response) => map_error_response(response),
+                _ if operation_deadline
+                    .is_some_and(|deadline| std::time::Instant::now() >= deadline) =>
+                {
+                    RemoteError::Transport("context deadline exceeded".to_string())
+                }
+                other => RemoteError::Transport(other.to_string()),
+            };
+            log::warn!(
+                target: "http",
+                "request failed method={method} path={path} duration_ms={elapsed} category={} error={}",
+                remote_error.category(),
+                remote_error.log_safe_summary()
+            );
+            remote_error
         })?;
 
+        let status = response.status();
+        log::info!(
+            target: "http",
+            "request completed method={method} path={path} status={status} duration_ms={elapsed}"
+        );
         let text = response
             .into_string()
             .map_err(|error| RemoteError::Json(format!("body read failed: {error}")))?;
@@ -158,15 +176,19 @@ impl MinifluxClient {
         &self,
         base: &EntriesFilter,
     ) -> Result<(Vec<EntryDto>, i64), RemoteError> {
+        log::info!(target: "http", "fetch_complete_selection started");
+        let start = Instant::now();
         let mut entries: Vec<EntryDto> = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut expected_total: i64 = -1;
         let mut after_entry_id: i64 = 0;
+        let mut page_count: u32 = 0;
 
         loop {
             let mut filter = base.clone();
             filter.after_entry_id = after_entry_id;
             let result = self.entries(&filter)?;
+            page_count += 1;
             if expected_total < 0 {
                 expected_total = result.total;
                 entries.reserve(result.entries.len());
@@ -190,8 +212,19 @@ impl MinifluxClient {
                 entries.push(entry);
             }
 
+            log::debug!(
+                target: "http",
+                "fetch_complete_selection page={page_count} collected={} expected={expected_total}",
+                entries.len()
+            );
+
             let collected = entries.len() as i64;
             if collected == expected_total {
+                let elapsed = start.elapsed().as_millis();
+                log::info!(
+                    target: "http",
+                    "fetch_complete_selection completed pages={page_count} entries={collected} total={expected_total} duration_ms={elapsed}"
+                );
                 return Ok((entries, expected_total));
             }
             if collected > expected_total {

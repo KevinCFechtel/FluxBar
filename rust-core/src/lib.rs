@@ -35,6 +35,7 @@ pub mod domain;
 mod ffi;
 pub mod icons;
 pub mod localization;
+pub mod logging;
 pub mod persistence;
 pub mod remote;
 pub mod runtime;

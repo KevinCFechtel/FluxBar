@@ -4,6 +4,8 @@
 //! the runtime/domain implementations. Every supported operation routes through
 //! this typed boundary without exposing JSON details to domain code.
 
+use std::time::Instant;
+
 use crate::runtime::AppRuntime;
 use crate::transport::{Operation, Response};
 
@@ -11,7 +13,16 @@ use crate::transport::{Operation, Response};
 ///
 /// All 11 current public operations have real handlers.
 pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
-    match operation {
+    let name = operation_name(&operation);
+    let is_localize = is_localize_operation(&operation);
+    if is_localize {
+        log::debug!(target: "ffi", "operation={name} dispatching");
+    } else {
+        log::info!(target: "ffi", "operation={name} dispatching");
+    }
+    let start = Instant::now();
+
+    let response = match operation {
         Operation::Configure {
             server,
             api_key,
@@ -107,6 +118,45 @@ pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
             other_fallback,
             count,
         } => handlers::localize_plural(&locales, &key, &one_fallback, &other_fallback, count),
+    };
+
+    let elapsed = start.elapsed().as_millis();
+    if response.ok {
+        if is_localize {
+            log::debug!(target: "ffi", "operation={name} completed duration_ms={elapsed}");
+        } else {
+            log::info!(target: "ffi", "operation={name} completed duration_ms={elapsed}");
+        }
+    } else {
+        log::warn!(
+            target: "ffi",
+            "operation={name} failed duration_ms={elapsed} error={}",
+            response.error
+        );
+    }
+    response
+}
+
+fn is_localize_operation(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Localize { .. } | Operation::LocalizePlural { .. }
+    )
+}
+
+fn operation_name(operation: &Operation) -> &'static str {
+    match operation {
+        Operation::Configure { .. } => "configure",
+        Operation::LocalSnapshot { .. } => "local_snapshot",
+        Operation::Refresh { .. } => "refresh",
+        Operation::SetRead { .. } => "set_read",
+        Operation::SetStarred { .. } => "set_starred",
+        Operation::UndoRead { .. } => "undo_read",
+        Operation::DiscardUndo { .. } => "discard_undo",
+        Operation::FlushPending { .. } => "flush_pending",
+        Operation::FeedIcon { .. } => "feed_icon",
+        Operation::Localize { .. } => "localize",
+        Operation::LocalizePlural { .. } => "localize_plural",
     }
 }
 

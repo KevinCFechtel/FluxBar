@@ -48,6 +48,20 @@ impl SharedStore {
             .map_err(|error| error.to_string())
     }
 
+    pub(crate) fn pending_count(&self, account_id: &str) -> Result<i64, String> {
+        self.state
+            .lock()
+            .pending_count(account_id)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn undo_count(&self, account_id: &str) -> Result<i64, String> {
+        self.state
+            .lock()
+            .undo_count(account_id)
+            .map_err(|error| error.to_string())
+    }
+
     #[cfg(test)]
     fn lock(&self) -> StateGuard<'_, Store> {
         self.state.lock()
@@ -239,18 +253,58 @@ impl SyncService {
     }
 
     pub fn sync(&self, selection: &Selection, retain_ids: &[i64]) -> Result<SyncResult, String> {
+        log::info!(
+            target: "sync",
+            "refresh started selection={} retain_ids={}",
+            selection_summary(selection),
+            retain_ids.len()
+        );
+        let start = Instant::now();
         let deadline = Instant::now() + REFRESH_DEADLINE;
         let newest_first = self.newest_first.load(Ordering::Relaxed);
         let _sync = self.sync_gate.lock_until(deadline)?;
         let _deadline = RemoteDeadlineGuard::new(self.remote.as_ref(), deadline);
-        self.sync_serialized(selection, retain_ids, deadline, newest_first)
+        let result = self.sync_serialized(selection, retain_ids, deadline, newest_first);
+        let elapsed = start.elapsed().as_millis();
+        match &result {
+            Ok(SyncResult::Success(data)) => log::info!(
+                target: "sync",
+                "refresh completed entries={} categories={} feeds={} total={} unread_total={} starred_total={} duration_ms={elapsed}",
+                data.entries.len(),
+                data.categories.len(),
+                feed_count(&data.categories),
+                data.total,
+                data.unread_total,
+                data.starred_total
+            ),
+            Ok(SyncResult::Partial(data, error)) => log::warn!(
+                target: "sync",
+                "refresh partial entries={} error={error} duration_ms={elapsed}",
+                data.entries.len()
+            ),
+            Err(error) => log::error!(
+                target: "sync",
+                "refresh failed error={error} duration_ms={elapsed}"
+            ),
+        }
+        result
     }
 
     pub fn flush(&self) -> Result<(), String> {
+        log::info!(target: "mutation", "flush started");
+        let start = Instant::now();
         let deadline = Instant::now() + FLUSH_DEADLINE;
         let _sync = self.sync_gate.lock_until(deadline)?;
         let _deadline = RemoteDeadlineGuard::new(self.remote.as_ref(), deadline);
-        self.flush_pending(deadline)
+        let result = self.flush_pending(deadline);
+        let elapsed = start.elapsed().as_millis();
+        match &result {
+            Ok(()) => log::info!(target: "mutation", "flush completed duration_ms={elapsed}"),
+            Err(error) => {
+                log::warn!(target: "mutation", "flush failed error={error} duration_ms={elapsed}")
+            }
+        }
+        result
     }
 
     pub fn flush_and_snapshot(
@@ -258,12 +312,32 @@ impl SyncService {
         selection: &Selection,
         retain_ids: &[i64],
     ) -> Result<SnapshotData, String> {
+        log::info!(
+            target: "mutation",
+            "flush_and_snapshot started selection={}",
+            selection_summary(selection)
+        );
+        let start = Instant::now();
         let deadline = Instant::now() + FLUSH_DEADLINE;
         let newest_first = self.newest_first.load(Ordering::Relaxed);
         let _sync = self.sync_gate.lock_until(deadline)?;
         let _deadline = RemoteDeadlineGuard::new(self.remote.as_ref(), deadline);
-        self.flush_pending(deadline)?;
-        self.local_snapshot_until(selection, retain_ids, deadline, newest_first)
+        let result = self.flush_pending(deadline).and_then(|()| {
+            self.local_snapshot_until(selection, retain_ids, deadline, newest_first)
+        });
+        let elapsed = start.elapsed().as_millis();
+        match &result {
+            Ok(data) => log::info!(
+                target: "mutation",
+                "flush_and_snapshot completed entries={} duration_ms={elapsed}",
+                data.entries.len()
+            ),
+            Err(error) => log::warn!(
+                target: "mutation",
+                "flush_and_snapshot failed error={error} duration_ms={elapsed}"
+            ),
+        }
+        result
     }
 
     pub fn feed_icon(&self, feed_id: i64) -> crate::icons::CachedIcon {
@@ -288,6 +362,11 @@ impl SyncService {
         read: bool,
         automatic: bool,
     ) -> Result<(SnapshotData, Option<MutationReceipt>), String> {
+        log::info!(
+            target: "mutation",
+            "set_read count={} read={read} automatic={automatic}",
+            ids.len()
+        );
         let deadline = Instant::now() + LOCAL_DEADLINE;
         let newest_first = self.newest_first.load(Ordering::Relaxed);
         let (snapshot, receipt) = {
@@ -308,6 +387,12 @@ impl SyncService {
             ensure_before(deadline)?;
             (snapshot, receipt)
         };
+        log::info!(
+            target: "mutation",
+            "set_read completed entries={} receipt={}",
+            snapshot.entries.len(),
+            receipt.is_some()
+        );
         Ok((snapshot, receipt))
     }
 
@@ -318,6 +403,7 @@ impl SyncService {
         starred: bool,
         retain_ids: &[i64],
     ) -> Result<SnapshotData, String> {
+        log::info!(target: "mutation", "set_starred entry_id={entry_id} starred={starred}");
         let deadline = Instant::now() + LOCAL_DEADLINE;
         let newest_first = self.newest_first.load(Ordering::Relaxed);
         let snapshot = {
@@ -333,6 +419,11 @@ impl SyncService {
             ensure_before(deadline)?;
             snapshot
         };
+        log::info!(
+            target: "mutation",
+            "set_starred completed entries={}",
+            snapshot.entries.len()
+        );
         Ok(snapshot)
     }
 
@@ -342,6 +433,7 @@ impl SyncService {
         receipt_id: &str,
         retain_ids: &[i64],
     ) -> Result<SnapshotData, String> {
+        log::info!(target: "mutation", "undo_read receipt_id={receipt_id}");
         let deadline = Instant::now() + LOCAL_DEADLINE;
         let newest_first = self.newest_first.load(Ordering::Relaxed);
         let snapshot = {
@@ -357,15 +449,22 @@ impl SyncService {
             ensure_before(deadline)?;
             snapshot
         };
+        log::info!(
+            target: "mutation",
+            "undo_read completed entries={}",
+            snapshot.entries.len()
+        );
         Ok(snapshot)
     }
 
     pub fn discard_undo(&self, receipt_id: &str) -> Result<(), String> {
+        log::info!(target: "mutation", "discard_undo receipt_id={receipt_id}");
         let deadline = Instant::now() + LOCAL_DEADLINE;
         self.store
             .lock_until(deadline)?
             .discard_undo(&self.account_id, receipt_id)
             .map_err(|error| error.to_string())?;
+        log::info!(target: "mutation", "discard_undo completed");
         ensure_before(deadline)
     }
 
@@ -377,15 +476,26 @@ impl SyncService {
         newest_first: bool,
     ) -> Result<SyncResult, String> {
         // Go logs and ignores a pre-refresh flush error.
-        let _ = self.flush_pending(deadline);
+        match self.flush_pending(deadline) {
+            Ok(()) => log::info!(target: "sync", "pre-refresh pending flush completed"),
+            Err(error) => log::warn!(target: "sync", "pre-refresh pending flush failed: {error}"),
+        }
         let remote_snapshot = match browse(self.remote.as_ref(), selection) {
             Ok(snapshot) => snapshot,
             Err(error) => {
+                log::warn!(target: "sync", "remote browse failed: {error}");
                 return self
                     .local_snapshot_until(selection, retain_ids, deadline, newest_first)
                     .map(|snapshot| SyncResult::Partial(snapshot, error));
             }
         };
+        log::info!(
+            target: "sync",
+            "remote browse completed entries={} categories={} feeds={}",
+            remote_snapshot.entries.len(),
+            remote_snapshot.categories.len(),
+            feed_count(&remote_snapshot.categories)
+        );
         self.store
             .lock_until(deadline)?
             .apply_snapshot(&self.account_id, &remote_snapshot)
@@ -402,7 +512,19 @@ impl SyncService {
             .pending(&self.account_id)
             .map_err(|error| error.to_string())?;
         ensure_before(deadline)?;
+        if pending.is_empty() {
+            log::debug!(target: "mutation", "pending flush skipped: no pending mutations");
+            return Ok(());
+        }
+        log::info!(target: "mutation", "pending flush started count={}", pending.len());
         for mutation in pending {
+            log::info!(
+                target: "mutation",
+                "pending flush mutation entry_id={} field={} desired={}",
+                mutation.entry_id,
+                mutation.field,
+                mutation.desired
+            );
             match mutation.field.as_str() {
                 "read" => self
                     .remote
@@ -429,6 +551,7 @@ impl SyncService {
                 .map_err(|error| error.to_string())?;
             ensure_before(deadline)?;
         }
+        log::info!(target: "mutation", "pending flush completed");
         Ok(())
     }
 
@@ -453,19 +576,45 @@ impl SyncService {
 
     fn schedule_flush(self: &Arc<Self>, delay: Duration) {
         let mut schedule = locked(&self.scheduler.state);
-        schedule.deadline = Some(Instant::now() + delay);
+        let now = Instant::now();
+        let new_deadline = now + delay;
+        if let Some(existing) = schedule.deadline {
+            if existing > new_deadline {
+                log::info!(
+                    target: "scheduler",
+                    "scheduler replaced old_delay_ms={} new_delay_ms={}",
+                    existing.saturating_duration_since(now).as_millis(),
+                    delay.as_millis()
+                );
+            } else {
+                log::debug!(
+                    target: "scheduler",
+                    "scheduler kept existing deadline, ignoring longer delay_ms={}",
+                    delay.as_millis()
+                );
+                return;
+            }
+        }
+        schedule.deadline = Some(new_deadline);
         self.scheduler.changed.notify_one();
+        log::info!(
+            target: "scheduler",
+            "scheduler scheduled delay_ms={}",
+            delay.as_millis()
+        );
         if schedule.worker_running {
             return;
         }
         schedule.worker_running = true;
         let service = Arc::clone(self);
         drop(schedule);
+        log::debug!(target: "scheduler", "scheduler worker started");
         if std::thread::Builder::new()
             .name("fluxbar-pending-flush".to_string())
             .spawn(move || service.run_scheduler())
             .is_err()
         {
+            log::error!(target: "scheduler", "scheduler worker spawn failed");
             locked(&self.scheduler.state).worker_running = false;
         }
     }
@@ -475,6 +624,7 @@ impl SyncService {
             let mut schedule = locked(&self.scheduler.state);
             let Some(deadline) = schedule.deadline else {
                 schedule.worker_running = false;
+                log::debug!(target: "scheduler", "scheduler worker stopped: no pending deadline");
                 return;
             };
             let now = Instant::now();
@@ -490,10 +640,18 @@ impl SyncService {
             }
             schedule.deadline = None;
             drop(schedule);
+            log::debug!(target: "scheduler", "scheduler timer fired");
             // Background errors are intentionally non-fatal, as in Go's
             // logging-only timer callback. A panic remains contained to this
             // worker and cannot unwind across the C ABI.
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.flush()));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.flush()));
+            match result {
+                Ok(Ok(())) => log::info!(target: "scheduler", "scheduler flush completed"),
+                Ok(Err(error)) => {
+                    log::warn!(target: "scheduler", "scheduler flush failed error={error}")
+                }
+                Err(_) => log::error!(target: "scheduler", "scheduler flush panic contained"),
+            }
         }
     }
 }
@@ -518,7 +676,26 @@ fn ensure_before(deadline: Instant) -> Result<(), String> {
     }
 }
 
+fn selection_summary(selection: &Selection) -> String {
+    let kind = match selection {
+        Selection::All { .. } => "all",
+        Selection::Unread { .. } => "unread",
+        Selection::Starred { .. } => "starred",
+        Selection::Category { .. } => "category",
+        Selection::Feed { .. } => "feed",
+    };
+    let id = selection.scope_id();
+    let unread = selection.is_unread_only();
+    format!("{kind} id={id} unread_only={unread}")
+}
+
+fn feed_count(categories: &[crate::domain::navigation::Category]) -> usize {
+    categories.iter().map(|c| c.feeds.len()).sum()
+}
+
 fn browse(remote: &dyn RemoteInbox, selection: &Selection) -> Result<SnapshotData, String> {
+    log::info!(target: "sync", "browse started selection={}", selection_summary(selection));
+    let start = Instant::now();
     let counters = remote
         .unread_counters()
         .map_err(|error| format!("Miniflux-Zähler laden: {error}"))?;
@@ -550,6 +727,17 @@ fn browse(remote: &dyn RemoteInbox, selection: &Selection) -> Result<SnapshotDat
         .collect();
     let (navigation, unread_total) =
         build_navigation(&category_inputs, &feed_inputs, &unread_counters);
+    let elapsed = start.elapsed().as_millis();
+    log::info!(
+        target: "sync",
+        "browse completed entries={} categories={} feeds={} total={} unread_total={} starred_total={} duration_ms={elapsed}",
+        entries.len(),
+        navigation.len(),
+        feed_count(&navigation),
+        total,
+        unread_total,
+        starred_total
+    );
     Ok(SnapshotData {
         version: 1,
         selection: selection.clone(),

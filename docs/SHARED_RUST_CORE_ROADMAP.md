@@ -233,6 +233,9 @@ memory pressure, process lifecycle, or locked/background behavior.
 **Recommended model:** GPT-5.6 Terra. Escalate ABI ownership or lifecycle
 ambiguity to GPT-5.6 Sol.
 
+The exact implementation and evidence gate for this phase are defined in
+`MOBILE_RUNTIME_PROOF_CONTRACT.md`.
+
 ## Phase 2: Mobile contracts, schema decision, and migration discovery
 
 **Objective:** Freeze the minimum mobile domain and persistence invariants,

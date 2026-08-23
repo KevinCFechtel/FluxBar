@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Instant;
 
 use crate::domain::account::account_id;
 use crate::domain::selection::Selection;
@@ -72,28 +73,56 @@ impl AppRuntime {
         generation: i64,
         locales: &[String],
     ) -> Response {
+        log::info!(target: "configure", "configure started");
+        let start = Instant::now();
+
         let normalized_server = match validate_configuration(server, api_key, locales) {
             Ok(server) => server,
-            Err(message) => return Response::error(message),
+            Err(message) => {
+                log::warn!(target: "configure", "configure failed: {message}");
+                return Response::error(message);
+            }
         };
         let trimmed_key = api_key.trim();
         let derived_account = account_id(&normalized_server, trimmed_key);
+        let account_prefix = account_prefix(&derived_account);
 
         let path = match &self.database_path_override {
             Some(path) => path.clone(),
             None => match default_database_path() {
                 Ok(path) => path,
-                Err(error) => return Response::error(error),
+                Err(error) => {
+                    log::error!(target: "configure", "database path resolution failed: {error}");
+                    return Response::error(error);
+                }
             },
         };
+        log::info!(
+            target: "configure",
+            "opening store account={account_prefix} generation={generation}"
+        );
         let store = {
             let mut current = locked(&self.store);
             match current.as_ref() {
                 Some(store) => Arc::clone(store),
                 None => {
                     let opened = match Store::open(&path) {
-                        Ok(store) => SharedStore::new(store),
+                        Ok(store) => {
+                            log::info!(target: "configure", "store opened account={account_prefix}");
+                            SharedStore::new(store)
+                        }
                         Err(error) => {
+                            let summary = match &error {
+                                crate::persistence::OpenError::Sqlite(e) => format!(
+                                    "category={} error={}",
+                                    crate::persistence::sqlite_error_category(e),
+                                    crate::persistence::sqlite_error_summary(e)
+                                ),
+                                crate::persistence::OpenError::Filesystem(_) => {
+                                    "database permissions".to_string()
+                                }
+                            };
+                            log::error!(target: "configure", "store open failed: {summary}");
                             return Response::error(format!("SQLite öffnen: {error}"));
                         }
                     };
@@ -103,12 +132,38 @@ impl AppRuntime {
             }
         };
         if let Err(error) = store.ensure_account(&derived_account, &normalized_server) {
+            log::error!(target: "configure", "account upsert failed: {error}");
             return Response::error(error);
+        }
+        match (
+            store.pending_count(&derived_account),
+            store.undo_count(&derived_account),
+        ) {
+            (Ok(pending), Ok(undo)) => {
+                log::info!(
+                    target: "configure",
+                    "existing account state loaded account={account_prefix} pending_mutations={pending} undo_batches={undo}"
+                );
+                if pending > 0 {
+                    log::info!(
+                        target: "configure",
+                        "pending mutations will be flushed by startup refresh pending_count={pending}"
+                    );
+                } else {
+                    log::info!(target: "configure", "no pending mutations found");
+                }
+            }
+            (Err(error), _) | (_, Err(error)) => {
+                log::warn!(target: "configure", "startup recovery state query failed: {error}");
+            }
         }
 
         let remote = match MinifluxClient::new(&normalized_server, trimmed_key) {
             Ok(remote) => remote,
-            Err(error) => return Response::error(error.to_string()),
+            Err(error) => {
+                log::error!(target: "configure", "remote client creation failed: {error}");
+                return Response::error(error.to_string());
+            }
         };
         let candidate = SyncService::with_shared_store(
             Arc::clone(&store),
@@ -118,6 +173,7 @@ impl AppRuntime {
         );
 
         let mut guard = locked(&self.session);
+        let replaced = generation >= guard.as_ref().map_or(0, |s| s.config.generation);
         if guard
             .as_ref()
             .is_none_or(|existing| generation >= existing.config.generation)
@@ -148,6 +204,11 @@ impl AppRuntime {
                 engine,
             });
         }
+        let elapsed = start.elapsed().as_millis();
+        log::info!(
+            target: "configure",
+            "configure completed account={account_prefix} generation={generation} replaced={replaced} duration_ms={elapsed}"
+        );
         Response::ok()
     }
 
@@ -330,6 +391,13 @@ fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Returns a short, non-secret correlation prefix for an account identifier.
+/// The full account ID is a SHA-256 hex digest; only the first 8 characters
+/// are logged so logs can be correlated without exposing the complete value.
+fn account_prefix(account_id: &str) -> String {
+    account_id.chars().take(8).collect()
 }
 
 /// Same validation rules as Go's `validateConfiguration`. Error messages are
@@ -775,6 +843,13 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn account_prefix_truncates_to_eight_chars() {
+        assert_eq!(account_prefix("abcdef123456"), "abcdef12");
+        assert_eq!(account_prefix("short"), "short");
+        assert!(account_prefix("").is_empty());
     }
 
     fn test_directory() -> TestDirectory {

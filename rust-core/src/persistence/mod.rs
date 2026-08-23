@@ -9,5 +9,5 @@ mod store;
 
 pub use store::{
     MutationReceipt, OpenError, PendingMutation, PersistedEntry, SNAPSHOT_LIMIT, SnapshotData,
-    Store,
+    Store, sqlite_error_category, sqlite_error_summary,
 };

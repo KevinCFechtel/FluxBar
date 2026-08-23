@@ -154,6 +154,7 @@ impl Store {
     /// Opens or creates a store at an explicitly supplied path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, OpenError> {
         let path = path.as_ref();
+        log::debug!(target: "persistence", "store open started");
         let connection = Connection::open(path)?;
         connection.busy_timeout(Duration::from_millis(5_000))?;
         connection.execute_batch(
@@ -161,6 +162,7 @@ impl Store {
         )?;
         connection.execute_batch(SCHEMA)?;
         set_private_file_permissions(path).map_err(OpenError::Filesystem)?;
+        log::info!(target: "persistence", "store opened");
         Ok(Self { connection })
     }
 
@@ -305,6 +307,16 @@ impl Store {
         account_id: &str,
         snapshot: &SnapshotData,
     ) -> rusqlite::Result<()> {
+        let start = std::time::Instant::now();
+        log::info!(
+            target: "reconciliation",
+            "apply_snapshot started entries={} categories={} feeds={} total={} starred_total={}",
+            snapshot.entries.len(),
+            snapshot.categories.len(),
+            snapshot.categories.iter().map(|c| c.feeds.len()).sum::<usize>(),
+            snapshot.total,
+            snapshot.starred_total
+        );
         let transaction = self.connection.unchecked_transaction()?;
         transaction.execute(
             "UPDATE accounts SET remote_starred_total=?1,last_sync_at=?2 WHERE id=?3",
@@ -401,7 +413,25 @@ impl Store {
                 ],
             )?;
         }
-        transaction.commit()
+        match transaction.commit() {
+            Ok(()) => {
+                let elapsed = start.elapsed().as_millis();
+                log::info!(
+                    target: "reconciliation",
+                    "apply_snapshot completed duration_ms={elapsed}"
+                );
+                Ok(())
+            }
+            Err(error) => {
+                log::error!(
+                    target: "reconciliation",
+                    "apply_snapshot failed category={} error={}",
+                    sqlite_error_category(&error),
+                    sqlite_error_summary(&error)
+                );
+                Err(error)
+            }
+        }
     }
 
     pub fn set_read(
@@ -411,6 +441,7 @@ impl Store {
         read: bool,
         undoable: bool,
     ) -> rusqlite::Result<Option<MutationReceipt>> {
+        let start = std::time::Instant::now();
         let transaction = self.connection.unchecked_transaction()?;
         let mut receipt = MutationReceipt {
             id: random_id(),
@@ -470,6 +501,12 @@ impl Store {
             )?;
         }
         transaction.commit()?;
+        let elapsed = start.elapsed().as_millis();
+        log::info!(
+            target: "persistence",
+            "mutation persistence completed operation=set_read count={} undoable={undoable} duration_ms={elapsed}",
+            receipt.count
+        );
         Ok((undoable && receipt.count > 0).then_some(receipt))
     }
 
@@ -479,21 +516,29 @@ impl Store {
         entry_id: i64,
         starred: bool,
     ) -> rusqlite::Result<()> {
+        let start = std::time::Instant::now();
         let transaction = self.connection.unchecked_transaction()?;
         transaction.execute(
             "UPDATE entries SET starred=?1 WHERE account_id=?2 AND id=?3",
             params![starred, account_id, entry_id],
         )?;
         upsert_pending(&transaction, account_id, entry_id, "starred", starred)?;
-        transaction.commit()
+        transaction.commit()?;
+        let elapsed = start.elapsed().as_millis();
+        log::info!(
+            target: "persistence",
+            "mutation persistence completed operation=set_starred entry_id={entry_id} duration_ms={elapsed}"
+        );
+        Ok(())
     }
 
     pub fn pending(&self, account_id: &str) -> rusqlite::Result<Vec<PendingMutation>> {
+        let start = std::time::Instant::now();
         let mut statement = self.connection.prepare(
             "SELECT entry_id,field,desired,revision FROM pending_mutations
              WHERE account_id=?1 ORDER BY updated_at",
         )?;
-        statement
+        let result: rusqlite::Result<Vec<_>> = statement
             .query_map([account_id], |row| {
                 Ok(PendingMutation {
                     entry_id: row.get(0)?,
@@ -502,7 +547,35 @@ impl Store {
                     revision: row.get(3)?,
                 })
             })?
-            .collect()
+            .collect();
+        if let Ok(ref items) = result {
+            let elapsed = start.elapsed().as_millis();
+            log::debug!(
+                target: "persistence",
+                "pending query completed count={} duration_ms={elapsed}",
+                items.len()
+            );
+        }
+        result
+    }
+
+    /// Lightweight COUNT of pending mutations for diagnostics. Bounded by the
+    /// number of pending rows, so it is safe for startup logging.
+    pub fn pending_count(&self, account_id: &str) -> rusqlite::Result<i64> {
+        self.connection.query_row(
+            "SELECT COUNT(*) FROM pending_mutations WHERE account_id=?1",
+            [account_id],
+            |row| row.get(0),
+        )
+    }
+
+    /// Lightweight COUNT of undo batches for diagnostics.
+    pub fn undo_count(&self, account_id: &str) -> rusqlite::Result<i64> {
+        self.connection.query_row(
+            "SELECT COUNT(*) FROM undo_batches WHERE account_id=?1",
+            [account_id],
+            |row| row.get(0),
+        )
     }
 
     pub fn acknowledge(
@@ -645,7 +718,15 @@ impl Store {
         newest_first: bool,
         retain_ids: &[i64],
     ) -> rusqlite::Result<SnapshotData> {
+        let start = std::time::Instant::now();
         let normalized = normalize_selection(selection);
+        let kind = selection_kind(&normalized);
+        log::debug!(
+            target: "persistence",
+            "snapshot query started selection={kind} id={} unread_only={}",
+            normalized.scope_id(),
+            normalized.is_unread_only()
+        );
         let (categories, unread_total) = self.navigation(account_id)?;
         let starred_total = self.starred_total(account_id)?;
 
@@ -679,6 +760,14 @@ impl Store {
             newest_first,
             retain_ids,
         )?;
+
+        let elapsed = start.elapsed().as_millis();
+        log::info!(
+            target: "persistence",
+            "snapshot query completed rows={} selection={kind} id={} duration_ms={elapsed}",
+            entries.len(),
+            normalized.scope_id()
+        );
 
         Ok(SnapshotData {
             version: 1,
@@ -986,11 +1075,92 @@ fn set_private_file_permissions(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Returns a stable, content-free category for a SQLite error. The category
+/// is safe for Release logs; no SQL text, bind values, or file paths are
+/// included.
+pub fn sqlite_error_category(error: &rusqlite::Error) -> &'static str {
+    use rusqlite::Error;
+    match error {
+        Error::SqliteFailure(code, _) => match code.code {
+            rusqlite::ErrorCode::DatabaseBusy => "busy",
+            rusqlite::ErrorCode::DatabaseLocked => "locked",
+            rusqlite::ErrorCode::ConstraintViolation => "constraint",
+            rusqlite::ErrorCode::OperationInterrupted => "interrupted",
+            _ => "sqlite",
+        },
+        Error::InvalidPath(_) | Error::SqliteSingleThreadedMode | Error::InvalidQuery => {
+            "configuration"
+        }
+        Error::FromSqlConversionFailure(_, _, _) | Error::IntegralValueOutOfRange(_, _) => {
+            "conversion"
+        }
+        Error::InvalidColumnIndex(_) | Error::InvalidColumnName(_) => "schema",
+        _ => "other",
+    }
+}
+
+/// A short, sanitized summary of a SQLite error suitable for logging. This
+/// deliberately omits SQL statements, paths, and bind parameters.
+pub fn sqlite_error_summary(error: &rusqlite::Error) -> String {
+    use rusqlite::Error;
+    match error {
+        Error::SqliteFailure(code, _) => format!("{:?}", code.code),
+        Error::InvalidPath(_) => "invalid database path".to_string(),
+        Error::FromSqlConversionFailure(_, _, _) => "column conversion failed".to_string(),
+        Error::IntegralValueOutOfRange(_, _) => "integer out of range".to_string(),
+        Error::InvalidColumnIndex(_) => "invalid column index".to_string(),
+        Error::InvalidColumnName(name) => format!("invalid column name: {name}"),
+        Error::InvalidQuery => "invalid query".to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
     use super::*;
+
+    #[test]
+    fn sqlite_error_category_classifies_common_errors() {
+        let busy = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DatabaseBusy,
+                extended_code: 0,
+            },
+            None,
+        );
+        assert_eq!(sqlite_error_category(&busy), "busy");
+
+        let locked = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::DatabaseLocked,
+                extended_code: 0,
+            },
+            None,
+        );
+        assert_eq!(sqlite_error_category(&locked), "locked");
+
+        let constraint = rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error {
+                code: rusqlite::ErrorCode::ConstraintViolation,
+                extended_code: 0,
+            },
+            None,
+        );
+        assert_eq!(sqlite_error_category(&constraint), "constraint");
+    }
+
+    #[test]
+    fn sqlite_error_summary_omits_paths_and_sql() {
+        let invalid_path = rusqlite::Error::InvalidPath(std::path::PathBuf::from(
+            "/Users/example/secret/db.sqlite",
+        ));
+        let summary = sqlite_error_summary(&invalid_path);
+        assert!(!summary.contains("secret"));
+        assert!(!summary.contains(".sqlite"));
+        assert_eq!(summary, "invalid database path");
+    }
 
     fn open_temp_store() -> (TestDirectory, std::path::PathBuf, Store) {
         let directory = TestDirectory::new();

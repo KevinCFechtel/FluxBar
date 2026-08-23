@@ -40,11 +40,22 @@ const PANIC_ERROR: &str = r#"{"ok":false,"error":"internal error"}"#;
 pub unsafe extern "C" fn FluxCoreRequest(request: *mut c_char) -> *mut c_char {
     let input = parse_input(request);
 
-    let result = std::panic::catch_unwind(AssertUnwindSafe(|| process(input, &RUNTIME)));
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        crate::logging::init();
+        process(input, &RUNTIME)
+    }));
 
     match result {
         Ok(response_json) => into_owned_c_string(response_json),
-        Err(_) => into_owned_c_string(PANIC_ERROR.to_string()),
+        Err(_) => {
+            // A panic here means something in `process` violated an invariant.
+            // We cannot rely on the logging facade being usable, but we can at
+            // least record that the FFI boundary contained a panic.
+            let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                log::error!(target: "ffi", "panic contained at FFI boundary");
+            }));
+            into_owned_c_string(PANIC_ERROR.to_string())
+        }
     }
 }
 
@@ -70,8 +81,12 @@ enum Input {
 
 fn process(input: Input, runtime: &AppRuntime) -> String {
     match input {
-        Input::Null => Response::null_request().to_json(),
+        Input::Null => {
+            log::error!(target: "ffi", "null request received");
+            Response::null_request().to_json()
+        }
         Input::InvalidUtf8(reason) => {
+            log::error!(target: "ffi", "invalid UTF-8 request: {reason}");
             Response::invalid_request(&format!("request is not valid UTF-8: {reason}")).to_json()
         }
         Input::Utf8(json) => handle_json(&json, runtime),
@@ -84,7 +99,10 @@ fn handle_json(json: &str, runtime: &AppRuntime) -> String {
     } else {
         match crate::transport::request::parse_request(json) {
             Ok(r) => r,
-            Err(e) => return Response::invalid_request(&e.to_string()).to_json(),
+            Err(e) => {
+                log::warn!(target: "ffi", "malformed JSON request: {e}");
+                return Response::invalid_request(&e.to_string()).to_json();
+            }
         }
     };
 
@@ -93,6 +111,7 @@ fn handle_json(json: &str, runtime: &AppRuntime) -> String {
         Err(error) => {
             // The error string from `into_operation` is already formatted as
             // `unsupported operation "..."` to match Go. Preserve it directly.
+            log::warn!(target: "ffi", "{error}");
             return Response {
                 ok: false,
                 error,

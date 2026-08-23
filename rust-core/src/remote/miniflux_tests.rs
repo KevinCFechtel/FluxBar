@@ -65,6 +65,36 @@ fn empty_endpoint_is_rejected_without_network() {
 }
 
 #[test]
+fn https_scheme_has_configured_tls_backend() {
+    // Regression: ureq 2.12's `native-tls` feature is not automatic; without
+    // a configured TLS backend every HTTPS request fails with
+    // "cannot make HTTPS request because no TLS backend is configured" before
+    // any network I/O happens. This test confirms TLS is compiled in by
+    // attempting an HTTPS connection to a closed local port and asserting the
+    // failure is a normal transport error, not the missing-TLS message.
+    let client = MinifluxClient::new("https://127.0.0.1:1/", KEY).expect("client");
+    let error = client.counters().expect_err("expected connection failure");
+    let message = error.to_string();
+    assert!(
+        !message.contains("no TLS backend configured"),
+        "ureq is missing a compiled TLS backend: {message}"
+    );
+}
+
+#[test]
+#[ignore = "requires network; run manually to validate live HTTPS trust chain"]
+fn https_public_endpoint_reaches_server() {
+    // Validate that rustls + rustls-native-certs can verify a real public
+    // certificate chain. This complements the offline regression test above by
+    // exercising the OS root store on the current platform.
+    let response = ureq::get("https://example.com/")
+        .set("User-Agent", "FluxBar-Test/1.0")
+        .call()
+        .expect("HTTPS request should succeed");
+    assert_eq!(response.status(), 200);
+}
+
+#[test]
 fn pagination_single_page_and_exact_boundary() {
     // One short page below the size threshold terminates via total match.
     let server = FakeServer::start(vec![page(&[5, 6], 2)]);

@@ -10,6 +10,7 @@
 *.cgo
 /dist/
 /.build/
+/Build/DerivedData/
 
 # Rust core build artifacts
 /rust-core/target/

@@ -1,4 +1,9 @@
 import Foundation
+import OSLog
+
+extension Logger {
+    static let fluxBar = Logger(subsystem: "dev.kevincfechtel.FluxBar", category: "ui")
+}
 
 enum GoCoreError: LocalizedError {
     case encoding(Error)
@@ -20,13 +25,17 @@ enum GoCoreError: LocalizedError {
 
 enum GoCore {
     static func request(_ request: CoreRequest) throws -> CoreResponse {
+        let operation = request.operation
+        Logger.fluxBar.info("core request started operation=\(operation)")
         let encoded: Data
         do {
             encoded = try JSONEncoder().encode(request)
         } catch {
+            Logger.fluxBar.error("core request encoding failed operation=\(operation): \(error.localizedDescription)")
             throw GoCoreError.encoding(error)
         }
         guard let json = String(data: encoded, encoding: .utf8) else {
+            Logger.fluxBar.error("core request produced invalid UTF-8 operation=\(operation)")
             throw GoCoreError.nullResponse
         }
 
@@ -34,6 +43,7 @@ enum GoCore {
             FluxCoreRequest(UnsafeMutablePointer(mutating: pointer))
         }
         guard let responsePointer else {
+            Logger.fluxBar.error("core request returned null pointer operation=\(operation)")
             throw GoCoreError.nullResponse
         }
         defer { FluxCoreFree(responsePointer) }
@@ -43,11 +53,14 @@ enum GoCore {
         do {
             response = try JSONDecoder().decode(CoreResponse.self, from: data)
         } catch {
+            Logger.fluxBar.error("core response decode failed operation=\(operation): \(error.localizedDescription)")
             throw GoCoreError.invalidResponse(error)
         }
         if !response.ok {
+            Logger.fluxBar.warning("core request failed operation=\(operation): \(response.error ?? "unknown")")
             throw GoCoreError.core(response.error ?? "Unknown Go core error")
         }
+        Logger.fluxBar.info("core request completed operation=\(operation)")
         return response
     }
 }

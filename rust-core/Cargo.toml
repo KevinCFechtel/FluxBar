@@ -15,10 +15,12 @@ serde_json = "1"
 sha2 = "0.10"
 rusqlite = { version = "0.37", features = ["bundled"] }
 # Synchronous Miniflux HTTP client. Blocking API matches the synchronous core
-# without an async runtime. native-tls keeps OS trust-store semantics (Go
-# parity): Security.framework on macOS/iOS, later rustls evaluation possible
-# for Android/Linux targets.
-ureq = { version = "2", features = ["native-tls"], default-features = false }
+# without an async runtime. The `tls` feature enables rustls; `native-certs`
+# makes rustls load the OS/platform root store (macOS Security.framework on
+# Apple platforms), preserving Go-like system-trust semantics. ureq 2.12's
+# `native-tls` feature is an adapter that requires explicit AgentBuilder
+# configuration, so rustls is the supported automatic backend.
+ureq = { version = "2", features = ["tls", "native-certs"], default-features = false }
 # RFC3339Nano-compatible UTC timestamps for pending/Undo rows and sync state.
 time = { version = "=0.3.41", features = ["formatting"] }
 # HTML5 parser for Go-compatible article preview/image extraction (Phase 9.1).
@@ -38,6 +40,14 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 resvg = { version = "0.48", default-features = false }
 # base64 decoding of Miniflux icon data URLs. Pure Rust, no transitive deps.
 base64 = "0.22"
+# Lightweight logging facade. Business modules use `log::info!` etc.; the
+# macOS backend routes records into Unified Logging. `release_max_level_info`
+# compiles out debug/trace logs in release builds.
+log = { version = "0.4", features = ["release_max_level_info"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Minimal Unified Logging backend for the `log` facade on Apple platforms.
+oslog = { version = "0.2", features = ["logger"] }
 
 [profile.release]
 opt-level = 3

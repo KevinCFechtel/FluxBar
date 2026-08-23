@@ -36,6 +36,8 @@ documented here.
     Rust coverage and FluxNews responsibilities.
 -   `SHARED_RUST_CORE_ROADMAP.md` --- post-FluxBar shared-core, native-client,
     binding, persistence, and Flutter migration execution plan.
+-   `MOBILE_RUNTIME_PROOF_CONTRACT.md` --- exact Phase 1 iOS/Android artifact,
+    lifecycle, SQLite, TLS, FFI, and physical-device proof contract.
 
 Read these only for core migration work or when changing the shared core
 boundary.

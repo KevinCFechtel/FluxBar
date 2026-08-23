@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import CoreSpotlight
+import OSLog
 import SwiftUI
 
 @MainActor
@@ -22,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var fallbackPanel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Logger.fluxBar.info("application did finish launching")
         statusItem = NSStatusBar.system.statusItem(withLength: Self.statusItemWidth)
         if let button = statusItem.button {
             if let iconURL = Bundle.main.url(forResource: "FluxBarTemplate", withExtension: "svg") {
@@ -105,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func popoverDidClose(_ notification: Notification) {
+        Logger.fluxBar.info("popover did close")
         statusItem.button?.highlight(false)
         store.setPopoverVisible(false)
         store.resetListPresentation()
@@ -112,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func popoverWillShow(_ notification: Notification) {
+        Logger.fluxBar.info("popover will show")
         store.setPopoverVisible(true)
         popover.contentSize = popoverSize(sidebarVisible: sidebarVisible)
     }
