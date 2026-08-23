@@ -226,8 +226,9 @@ During this migration:
     share more code.
 -   Keep FFI concerns at the outer adapter boundary. Domain code must
     not depend on raw C pointers, Swift, AppKit, or SwiftUI.
--   Keep the Go core as the default/fallback until a migration phase
-    explicitly changes that decision.
+-   Rust is now the default core for normal development/local builds; the
+    Go core remains the production/reference implementation and explicit
+    fallback.
 -   Do not advance into a later migration phase unless the task requests
     it.
 

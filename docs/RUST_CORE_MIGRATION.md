@@ -567,14 +567,28 @@ does not alter the Go-backed release path, and does not remove Go.
 
 ## Phase 11 --- Rust becomes development default
 
-Switch the normal development core to Rust only after compatibility
-gates pass.
+**Status: COMPLETE.** On 2026-08-23 the normal development core was switched
+to Rust. `Build/build.sh` and `Build/build-core.sh` now default to Rust when
+`FLUX_CORE` is unset; valid values remain `rust` and `go`, with an explicit
+error for any other value. `FLUX_CORE=rust` and `FLUX_CORE=go` both work;
+`Build/release-go.sh` remains explicitly Go-backed so signed releases stay
+pinned to the proven core.
 
-Keep an explicit Go fallback.
+This switch affects only the default developer/local build path. Go remains
+the production/reference implementation and the fallback for regression
+isolation. No Go code was removed or deprecated, the SQLite schema was not
+changed, and no new bridge/dependency was introduced.
 
 ## Phase 12 --- Proving releases
 
 Ship Rust-backed releases while retaining Go for regression isolation.
+
+A parallel signed/notarized Rust release-candidate script,
+`Build/release-rust.sh`, is available for realistic local testing. It uses
+the same signing identity, hardened runtime, notarization process,
+versioning, packaging, and validation as `Build/release-go.sh`. The
+artifact filename includes `-rust` to avoid overwriting the Go reference
+release; the app bundle name and identifier remain unchanged.
 
 Suggested removal gate:
 

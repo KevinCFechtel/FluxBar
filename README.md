@@ -31,20 +31,20 @@ missing target, install it with `rustup target add <target>`.
 
 ## Build the App
 
-The default developer build uses the Go core, which remains the production/reference implementation:
+The default developer build uses the Rust core, which is now the normal development default:
 
 ```bash
-./Build/build.sh              # default: Go core
-FLUX_CORE=go ./Build/build.sh # explicit Go core
+./Build/build.sh               # default: Rust core
+FLUX_CORE=rust ./Build/build.sh # explicit Rust core
 ```
 
-An experimental Rust core build is available for development and compatibility testing:
+The Go core remains available as the explicit production/reference fallback:
 
 ```bash
-FLUX_CORE=rust ./Build/build.sh
+FLUX_CORE=go ./Build/build.sh  # explicit Go core
 ```
 
-The Rust core implements the current public operation surface but remains experimental. Phase 10 found unresolved service-lock/deadline parity risks, so Go remains the default and production/reference implementation.
+Go remains the release-pinned production core (`Build/release-go.sh`). Rust is the default for normal development and local builds after Phase 10.2.
 
 Both build paths produce `dist/FluxBar.app`. On first launch, enter the Miniflux URL and API key through “Settings…” in the menu. Credentials do not need to be stored in the source code or any build files.
 
@@ -59,6 +59,14 @@ cp Build/.env.example Build/.env
 ```
 
 `Build/.env` is ignored by Git. The completed archive is written to `dist/release/`.
+
+A parallel Rust-backed signed release candidate is available for testing:
+
+```bash
+./Build/release-rust.sh
+```
+
+It uses the same signing identity, hardened runtime, notarization, and artifact layout as `release-go.sh`, but builds the Rust-backed app. The bundle name, identifier, and signing configuration remain identical to the Go release path.
 
 ## Development
 

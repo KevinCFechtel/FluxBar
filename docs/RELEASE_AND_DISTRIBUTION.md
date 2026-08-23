@@ -13,31 +13,41 @@ These channels can coexist.
 ## Current Native Build
 
 `Build/build.sh` is the default developer build entry point. It dispatches
-to `Build/build-go.sh` (default) or `Build/build-rust.sh` based on the
+to `Build/build-rust.sh` (default) or `Build/build-go.sh` based on the
 `FLUX_CORE` environment variable. Both scripts build the same SwiftUI/AppKit
 target through Xcode; the Xcode build phase calls `Build/build-core.sh`,
 which produces the implementation-neutral core artifacts
 `libfluxcore.a` / `libfluxcore.h` from either the Go or Rust core.
 
+`Build/build-rust.sh` builds the native application against the Rust core
+in `rust-core/`. Rust is now the default for normal development and local
+builds. All current public operations are implemented and Phase 10.2 cleared
+it for development-default use.
+
 `Build/build-go.sh` compiles and links the Go core from `go-core/` as a
 C archive, copies `FluxBar.app` to `dist`, and applies an ad-hoc signature
-for local execution. The current top-level build is architecture-specific
-even though the lower-level `Build/build-go-core.sh` script can combine
-multiple architectures.
-
-`Build/build-rust.sh` builds the same native application against the Rust
-core in `rust-core/`. All current public operations are implemented, but the
-Phase 10.1 concurrency audit only approves controlled development evaluation.
-It remains an explicit experimental compatibility candidate, not the
-production release core. Go remains the default and `Build/release-go.sh`
-remains the pinned production release path.
+for local execution. Go remains the explicit production/reference core and
+the pinned fallback: `FLUX_CORE=go ./Build/build.sh` still works, and
+`Build/release-go.sh` continues to build with Go.
 
 `Build/release-go.sh` implements the direct-distribution path for the
 Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It
 verifies the signature, notarization ticket, Gatekeeper assessment, and
-re-extracted final artifact. DMG packaging, universal release artifacts,
-Mac App Store packaging, Homebrew publication, and release CI remain
-future work.
+re-extracted final artifact. The release path is intentionally pinned to
+Go so that a Rust default change in development cannot leak into signed
+releases.
+
+`Build/release-rust.sh` is a parallel signed/notarized release script that
+builds the Rust-backed app using the same signing identity, hardened
+runtime, notarization mechanism, versioning, packaging, and validation
+sequence as `release-go.sh`. It produces a `-rust.zip` artifact to avoid
+overwriting the Go release archive, while the app bundle inside remains
+`FluxBar.app` with the same bundle identifier. It is intended for Rust
+release-candidate testing and does not replace the Go reference release
+path.
+
+DMG packaging, universal release artifacts, Mac App Store packaging,
+Homebrew publication, and release CI remain future work.
 
 ## Identity and Compatibility
 
@@ -116,9 +126,15 @@ path and calls `Build/build-go.sh` with `FLUX_CORE=go` explicitly. An inherited
 developer-shell value such as `FLUX_CORE=rust` cannot select Rust for this
 release path.
 
-Rust build artifacts may be produced for development and compatibility
-testing, but adding Rust must not silently alter signing, notarization,
-archive layout, release automation, or distribution channels.
+`Build/release-rust.sh` is the parallel Rust release-candidate path and
+calls `Build/build-rust.sh` with `FLUX_CORE=rust` explicitly. An inherited
+developer-shell value such as `FLUX_CORE=go` cannot select Go for this
+release path.
+
+Both release scripts use the same signing identity, hardened runtime,
+notarization mechanism, archive layout, and validation sequence. Rust must
+not silently alter signing, notarization, archive layout, release
+automation, or distribution channels.
 
 When Rust eventually becomes the default core, keep an explicit
 Go-backed fallback build for the proving period described in

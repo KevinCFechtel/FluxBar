@@ -3,12 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-case "${FLUX_CORE:-go}" in
-  go)
-    exec "${SCRIPT_DIR}/build-go.sh" "$@"
-    ;;
+case "${FLUX_CORE:-rust}" in
   rust)
     exec "${SCRIPT_DIR}/build-rust.sh" "$@"
+    ;;
+  go)
+    exec "${SCRIPT_DIR}/build-go.sh" "$@"
     ;;
   *)
     echo "Nicht unterstützter FLUX_CORE-Wert: ${FLUX_CORE}" >&2

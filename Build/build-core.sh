@@ -6,12 +6,12 @@ OUTPUT_DIR="${1:?output directory required}"
 shift
 ARCHS=("$@")
 
-case "${FLUX_CORE:-go}" in
-  go)
-    exec "${SCRIPT_DIR}/build-go-core.sh" "${OUTPUT_DIR}" "${ARCHS[@]}"
-    ;;
+case "${FLUX_CORE:-rust}" in
   rust)
     exec "${SCRIPT_DIR}/build-rust-core.sh" "${OUTPUT_DIR}" "${ARCHS[@]}"
+    ;;
+  go)
+    exec "${SCRIPT_DIR}/build-go-core.sh" "${OUTPUT_DIR}" "${ARCHS[@]}"
     ;;
   *)
     echo "Nicht unterstützter FLUX_CORE-Wert: ${FLUX_CORE}" >&2
