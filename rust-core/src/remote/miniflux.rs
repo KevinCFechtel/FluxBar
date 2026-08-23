@@ -59,16 +59,26 @@ impl MinifluxClient {
         path: &str,
         body: Option<String>,
     ) -> Result<String, RemoteError> {
+        let operation_deadline = *self
+            .operation_deadline
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.execute_with_deadline(method, path, body, operation_deadline)
+    }
+
+    fn execute_with_deadline(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<String>,
+        operation_deadline: Option<std::time::Instant>,
+    ) -> Result<String, RemoteError> {
         let mut request = self
             .agent
             .request(method, &format!("{}{path}", self.endpoint))
             .set("User-Agent", USER_AGENT)
             .set("Content-Type", "application/json")
             .set("Accept", "application/json");
-        let operation_deadline = *self
-            .operation_deadline
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(deadline) = operation_deadline {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
@@ -312,6 +322,25 @@ impl RemoteInbox for MinifluxClient {
 
     fn icon_data_url(&self, feed_id: i64) -> Result<Option<String>, RemoteError> {
         Ok(MinifluxClient::icon(self, feed_id)?.map(|icon| icon.data))
+    }
+
+    fn icon_data_url_with_deadline(
+        &self,
+        feed_id: i64,
+        deadline: std::time::Instant,
+    ) -> Result<Option<String>, RemoteError> {
+        let body = self.execute_with_deadline(
+            "GET",
+            &format!("/v1/feeds/{feed_id}/icon"),
+            None,
+            Some(deadline),
+        )?;
+        if body.is_empty() {
+            return Ok(None);
+        }
+        let icon: FeedIconDto =
+            serde_json::from_str(&body).map_err(|error| RemoteError::Json(error.to_string()))?;
+        Ok(Some(icon.data))
     }
 
     fn set_read_batch(&self, entry_ids: &[i64], read: bool) -> Result<(), RemoteError> {

@@ -27,9 +27,10 @@ multiple architectures.
 
 `Build/build-rust.sh` builds the same native application against the Rust
 core in `rust-core/`. All current public operations are implemented, but the
-Phase 10 audit still classifies Rust as experimental because concurrency and
-whole-operation deadline parity are unresolved. It remains a compatibility and
-development candidate, not the production release core.
+Phase 10.1 concurrency audit only approves controlled development evaluation.
+It remains an explicit experimental compatibility candidate, not the
+production release core. Go remains the default and `Build/release-go.sh`
+remains the pinned production release path.
 
 `Build/release-go.sh` implements the direct-distribution path for the
 Go-backed app as a Developer ID-signed, hardened, notarized ZIP. It

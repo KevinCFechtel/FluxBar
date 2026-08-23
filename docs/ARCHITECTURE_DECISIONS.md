@@ -263,10 +263,20 @@ remote adapter has produced a complete, stable selection. Pending rows and
 Undo metadata remain account-scoped and durable across process restart.
 
 Rust sync/flush uses blocking, account-bound orchestration without an async
-runtime. Public refresh/flush deadlines, the Miniflux HTTP library timeout,
-and the delayed automatic-read timer are separate limits. Delayed work may
-retain its original account service after reconfiguration, but can never use
-the replacement account's store or remote client.
+runtime. Refresh and pending flush serialize on a per-service gate;
+same-account reconfiguration and account round trips must reuse that gate while
+its service remains alive. Retained account services share one runtime-wide
+SQLite connection, while icons use independent
+cache/single-flight synchronization. Never hold SQLite ownership or icon state
+across Miniflux network I/O. Public operation deadlines include waits for the
+refresh/flush gate or SQLite ownership. Synchronous SQLite/image calls cannot
+be cancelled mid-call and require immediate post-call deadline checks;
+committed pending work must be scheduled before such a check can return an
+error. The Miniflux HTTP library timeout and delayed automatic-read timer remain
+separate limits.
+Delayed work may retain its original account service after reconfiguration,
+but can never use the replacement account's store or remote client. Pending
+revision acknowledgement must preserve a newer concurrent local value.
 
 After Rust is stable, a typed binding layer such as UniFFI may be
 evaluated separately. That later adapter decision must not leak FFI

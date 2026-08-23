@@ -218,25 +218,29 @@ it does not mean every possible input is proven equivalent.
 | Operation | Request parity | Response parity | DB-state parity | Remote-call parity | Error parity | Sequential parity | Existing coverage | Missing coverage |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | configure | null/default/validation and account generations covered | validation/success covered | account upsert and stale side effect covered | none by design | representative localized/URL errors | A to B to stale C to A unit characterization | ABI, Go/Rust runtime tests | exhaustive URL parser equivalence; public cross-process sequence |
-| local_snapshot | selections/retain/order covered | semantic snapshot JSON covered | Go-created snapshot fixtures; bidirectional schema/state separately covered | none | unconfigured covered | reopen and account isolation covered separately | snapshot/SQLite/ABI suites | snapshot after public account switch; Rust-produced snapshot fixture; concurrent slow refresh |
-| refresh | production service inputs covered below dispatcher | success/partial/error snapshot covered | selected account/navigation/entry/pending/Undo columns | exact method/path/body/order in sync suite | auth, 5xx, malformed, pagination failures | initial/incremental/restart-pending sequences | remote/sync suites | full-row DB comparison; public ABI sequence; timeout/cancellation; concurrent local work |
-| set_read | batch/reversal/repeat/automatic store paths covered | snapshots and receipt unit behavior covered | effective/pending/revision/Undo covered | exact later flush trace | first/middle failures covered | cycles, retry, restart, Undo | sync/SQLite/unit tests | public ABI sequence; deadline and scheduler race differential |
+| local_snapshot | selections/retain/order covered | semantic snapshot JSON covered | Go-created snapshot fixtures; bidirectional schema/state separately covered | none | unconfigured covered | reopen, account isolation, and blocked-refresh concurrency covered | snapshot/SQLite/ABI/concurrency tests | snapshot after public account switch; Rust-produced snapshot fixture |
+| refresh | production service inputs covered below dispatcher | success/partial/error snapshot covered | selected account/navigation/entry/pending/Undo columns | exact method/path/body/order in sync suite | auth, 5xx, malformed, pagination failures | initial/incremental/restart-pending sequences; refresh/refresh and refresh/flush serialization | remote/sync/concurrency suites | full-row DB comparison; public ABI sequence; live timeout cancellation |
+| set_read | batch/reversal/repeat/automatic store paths covered | snapshots and receipt unit behavior covered | effective/pending/revision/Undo covered | exact later flush trace | first/middle failures covered | cycles, retry, restart, Undo, blocked-refresh local work, scheduler race | sync/SQLite/unit/concurrency tests | public ABI sequence; cross-process scheduler race |
 | set_starred | desired/reversal/repeat covered | snapshots covered | effective/pending/revision covered | GET state plus optional toggle trace | first/middle failures covered | cycles, retry, restart | sync/SQLite/unit tests | nonexistent-ID public behavior; concurrent supersession |
 | undo_read | valid before/after delivery covered | snapshots covered | Undo deletion and compensating pending covered | later flush trace covered | unknown receipt characterized by stores | before/after flush, restart continuation | sync/SQLite/unit tests | public duplicate/empty receipt sequence; timer race |
 | discard_undo | valid discard covered | success/final snapshot path covered | metadata-only deletion covered | later no-op effect covered | unknown ID characterized by store behavior | discard then flush and cross-core continuation | sync/SQLite tests | public empty-ID response sequence; timer race |
-| flush_pending | equivalent pending queues covered | success/error/final snapshot covered | successful prefix and suffix persistence covered | exact ordered trace | first/middle failure plus retry | mixed queue and restart-pending | sync/SQLite suites | outer timeout including DB work; concurrent replacement |
-| feed_icon | feed ID/default wire fields covered | base64/omission and decoded pixels covered | not applicable | not differentially covered; Rust adapter test only | not differentially covered; Rust retry tests plus Go source characterization | not differential; Rust cache/retry/single-flight unit sequences | icon/remote/ABI tests | public concurrent calls, differential retry, waiter cancellation, account switch during load |
+| flush_pending | equivalent pending queues covered | success/error/final snapshot covered | successful prefix, suffix persistence, and superseding revision covered | exact ordered trace | first/middle failure plus retry | mixed queue, restart-pending, refresh/flush and flush/flush serialization | sync/SQLite/concurrency suites | live outer-timeout differential; cross-process concurrent replacement |
+| feed_icon | feed ID/default wire fields covered | base64/omission and decoded pixels covered | not applicable | Rust adapter plus blocked-icon overlap tests | Rust retry and waiter-deadline tests plus Go source characterization | Rust cache/retry/single-flight/overlap unit sequences | icon/remote/ABI/concurrency tests | public cross-process concurrent calls; differential retry; account switch during load |
 | localize | null/default/Unicode/ordered locales covered | exact text covered | not applicable | not applicable | unknown-key fallback | many sequential ABI calls | localization/ABI suites | arbitrary Accept-Language syntax and catalog-load failure |
 | localize_plural | null/default/negative/64-bit counts covered | exact plural text covered | not applicable | not applicable | missing-key fallback | sequential ABI calls | localization/ABI suites | non-integer JSON and arbitrary locale matcher forms |
 
-### Phase 10 unresolved readiness risks
+### Phase 10.1 remaining coverage risks
 
-- Rust's service-wide mutex can block local snapshot/mutation/icon calls behind
-  slow remote work; Go permits local operations while refresh/flush is waiting.
-- Go contexts bound subsequent HTTP/SQLite calls but do not cancel waits on
-  Go's refresh/flush mutex. Rust's mutex covers more operations, including
-  local snapshots/mutations and icons, so unrelated local work can wait behind
-  remote I/O; its HTTP deadline also excludes that broader lock wait.
+- The former Rust service-wide blocking risk is resolved. Refresh/flush and
+  SQLite ownership waits use absolute operation deadlines; local and icon work
+  have independent synchronization.
+- Go's `syncMu` wait is not context-cancellable. Rust intentionally improves
+  this internal behavior by timing out its equivalent serial-gate wait; wire
+  error shape and successful-operation ordering remain compatible.
+- Deterministic in-process concurrency tests and a mirrored Go characterization
+  cover the operation graph. A cross-process differential concurrency harness
+  is still absent because controlled interleavings require test-only gates not
+  exposed through the production C/JSON ABI.
 - Full process termination is simulated by close/reopen helpers and separate
   Go/Rust producer/consumer processes; remote delivery continuation after an OS
   process kill is not separately scripted.
@@ -250,6 +254,23 @@ The SQLite suite also creates pending read/star and Undo state in each
 implementation and has the other implementation continue it. Timer unit tests
 use a narrowly injected short automatic delay instead of repeatedly sleeping
 10 seconds; production always uses 10 seconds.
+
+### Phase 10.2 development-default re-check
+
+The 2026-08-23 re-check independently reran the full Rust suite (122 tests),
+the focused 14-test parallel sync/concurrency suite, `go test ./...`, `go vet
+./...`, and `go test -race ./internal/inbox -count=10`. It also reran all eight
+aggregate parity suites and compared 2,073 valid UTF-8 JSON responses per core
+through the C ABI. All passed. The Go/Rust universal core build scripts' C
+smoke callers passed, as did default, explicit-Go, and explicit-Rust app builds
+and a Rust-linked launch smoke.
+
+Deterministic in-process barriers remain the intended concurrency evidence;
+the C/JSON ABI intentionally exposes no test-only cross-process coordination.
+The absent live-product checks are classified as pre-1.0 hardening, not a
+development-default compatibility blocker. FluxBar has no public Go-backed
+installed base, so clean Rust-created state is the first-release requirement;
+bidirectional SQLite tests remain compatibility-oracle coverage only.
 
 ## Sync scenarios
 

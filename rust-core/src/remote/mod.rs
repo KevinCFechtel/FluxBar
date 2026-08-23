@@ -100,7 +100,7 @@ pub fn dto_mapping_inputs(
 /// Remote capabilities FluxBar uses, isolated for Phase 8 orchestration.
 ///
 /// Implemented by [`MinifluxClient`]; tests provide fakes.
-pub trait RemoteInbox: Send {
+pub trait RemoteInbox: Send + Sync {
     /// Applies an absolute public-operation deadline to subsequent calls.
     /// Fakes may ignore it; the HTTP adapter caps each request by the
     /// remaining duration. `None` restores the library-level timeout.
@@ -120,6 +120,16 @@ pub trait RemoteInbox: Send {
 
     /// Raw remote icon data URL; processing/caching belongs to `icons`.
     fn icon_data_url(&self, feed_id: i64) -> Result<Option<String>, RemoteError>;
+
+    /// Fetches an icon under a caller-specific deadline. This remains separate
+    /// from the serialized refresh/flush deadline so icon work may overlap it.
+    fn icon_data_url_with_deadline(
+        &self,
+        feed_id: i64,
+        _deadline: std::time::Instant,
+    ) -> Result<Option<String>, RemoteError> {
+        self.icon_data_url(feed_id)
+    }
 
     /// Low-level remote mutations; scheduling/orchestration stays in Phase 8.
     fn set_read_batch(&self, entry_ids: &[i64], read: bool) -> Result<(), RemoteError>;

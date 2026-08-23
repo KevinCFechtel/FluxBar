@@ -174,13 +174,20 @@ Phase 10 adversarial differential testing substantially expanded transport,
 sequence, restart, account-isolation, snapshot-boundary, parser, localization,
 and icon coverage.
 
-Rust remains experimental and Go remains the default/reference. Phase 10 did
-not approve a development-default transition because Rust still serializes
-remote, SQLite, and icon work behind one service mutex. A slow refresh or icon
-request can therefore delay a local snapshot or mutation beyond the equivalent
-Go behavior, and Rust's HTTP deadlines do not yet provide an exact outer
-deadline over lock waits plus SQLite work. These are explicit remediation
-items, not assumed parity.
+Rust remains experimental and Go remains the default/reference. Phase 10.1
+removed the broad Rust service mutex. Each retained account service now has a
+deadline-aware refresh/flush serial gate and independent icon
+cache/single-flight and delayed-worker state. Retained services share one
+runtime-wide, deadline-aware SQLite connection. Local snapshots and optimistic
+mutations can therefore proceed while remote or icon work is blocked.
+Reconfiguration publishes a new service only for an account change;
+same-account configuration and account round trips reuse any still-live
+account service through a weak registry. In-flight and delayed work retaining
+an old account service cannot switch to the replacement account or race a
+second gate for their original account. Phase 10.2 independently re-checked
+this model and approved Rust for the next, explicit development-default phase.
+The current build and release defaults remain unchanged until that phase is
+performed.
 
 Initial migration constraints:
 

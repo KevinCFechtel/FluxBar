@@ -470,6 +470,15 @@ impl IconService {
     /// Returns the regular and dark byte arrays for `feed_id`. Missing or
     /// unprocessable icons return empty byte arrays, matching Go behavior.
     pub fn feed_icon(&self, feed_id: i64, remote: &dyn RemoteInbox) -> CachedIcon {
+        self.feed_icon_with_deadline(feed_id, remote, None)
+    }
+
+    pub fn feed_icon_with_deadline(
+        &self,
+        feed_id: i64,
+        remote: &dyn RemoteInbox,
+        deadline: Option<std::time::Instant>,
+    ) -> CachedIcon {
         loop {
             {
                 let cache = self.cache.lock().unwrap_or_else(|p| p.into_inner());
@@ -487,9 +496,30 @@ impl IconService {
                 let mut ready = slot.ready.lock().unwrap_or_else(|p| p.into_inner());
                 slot.waiters.fetch_add(1, Ordering::SeqCst);
                 while !*ready {
-                    ready = slot.condvar.wait(ready).unwrap_or_else(|p| p.into_inner());
+                    if let Some(deadline) = deadline {
+                        let remaining =
+                            deadline.saturating_duration_since(std::time::Instant::now());
+                        if remaining.is_zero() {
+                            slot.waiters.fetch_sub(1, Ordering::SeqCst);
+                            return CachedIcon::default();
+                        }
+                        let (next, timeout) = slot
+                            .condvar
+                            .wait_timeout(ready, remaining)
+                            .unwrap_or_else(|p| p.into_inner());
+                        ready = next;
+                        if timeout.timed_out() && !*ready {
+                            slot.waiters.fetch_sub(1, Ordering::SeqCst);
+                            return CachedIcon::default();
+                        }
+                    } else {
+                        ready = slot.condvar.wait(ready).unwrap_or_else(|p| p.into_inner());
+                    }
                 }
                 slot.waiters.fetch_sub(1, Ordering::SeqCst);
+                if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+                    return CachedIcon::default();
+                }
                 return self
                     .cache
                     .lock()
@@ -517,7 +547,7 @@ impl IconService {
                 feed_id,
                 slot,
             };
-            let result = self.load_and_process(feed_id, remote);
+            let result = self.load_and_process(feed_id, remote, deadline);
             if let Ok(icon) = result {
                 self.cache
                     .lock()
@@ -529,8 +559,17 @@ impl IconService {
         }
     }
 
-    fn load_and_process(&self, feed_id: i64, remote: &dyn RemoteInbox) -> Result<CachedIcon, ()> {
-        let data_url = match remote.icon_data_url(feed_id) {
+    fn load_and_process(
+        &self,
+        feed_id: i64,
+        remote: &dyn RemoteInbox,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<CachedIcon, ()> {
+        let loaded = match deadline {
+            Some(deadline) => remote.icon_data_url_with_deadline(feed_id, deadline),
+            None => remote.icon_data_url(feed_id),
+        };
+        let data_url = match loaded {
             Ok(Some(url)) => url,
             Ok(None) | Err(_) => return Err(()),
         };
@@ -539,6 +578,9 @@ impl IconService {
             Ok(bytes) => bytes,
             Err(_) => return Err(()),
         };
+        if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            return Err(());
+        }
 
         let mode = BackgroundMode::from_env_lists(
             &self.background_always,
@@ -550,6 +592,9 @@ impl IconService {
             Ok(None) => Vec::new(),
             Err(_) => Vec::new(),
         };
+        if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
+            return Err(());
+        }
 
         Ok(CachedIcon { regular, dark })
     }
@@ -1000,7 +1045,13 @@ mod tests {
 
         let mut entered = remote.entered.0.lock().unwrap();
         while !*entered {
-            entered = remote.entered.1.wait(entered).unwrap();
+            let (next, timeout) = remote
+                .entered
+                .1
+                .wait_timeout(entered, Duration::from_secs(2))
+                .unwrap();
+            entered = next;
+            assert!(!timeout.timed_out(), "icon load did not enter in time");
         }
         drop(entered);
         let slot = service.loads.lock().unwrap().get(&42).unwrap().clone();
@@ -1031,6 +1082,79 @@ mod tests {
 
         assert!(!service.feed_icon(42, remote.as_ref()).regular.is_empty());
         assert_eq!(remote.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn icon_single_flight_waiter_honors_its_own_deadline() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        struct BlockingRemote {
+            entered: (Mutex<bool>, Condvar),
+            release: (Mutex<bool>, Condvar),
+        }
+
+        impl RemoteInbox for BlockingRemote {
+            remote_stubs!();
+
+            fn icon_data_url(
+                &self,
+                _feed_id: i64,
+            ) -> Result<Option<String>, crate::remote::RemoteError> {
+                *self.entered.0.lock().unwrap() = true;
+                self.entered.1.notify_all();
+                let mut released = self.release.0.lock().unwrap();
+                while !*released {
+                    released = self.release.1.wait(released).unwrap();
+                }
+                Ok(None)
+            }
+        }
+
+        let remote = Arc::new(BlockingRemote {
+            entered: (Mutex::new(false), Condvar::new()),
+            release: (Mutex::new(false), Condvar::new()),
+        });
+        let service = Arc::new(IconService::new());
+        let leader_service = Arc::clone(&service);
+        let leader_remote = Arc::clone(&remote);
+        let leader =
+            std::thread::spawn(move || leader_service.feed_icon(42, leader_remote.as_ref()));
+
+        let mut entered = remote.entered.0.lock().unwrap();
+        while !*entered {
+            let (next, timeout) = remote
+                .entered
+                .1
+                .wait_timeout(entered, Duration::from_secs(2))
+                .unwrap();
+            entered = next;
+            assert!(!timeout.timed_out(), "icon load did not enter in time");
+        }
+        drop(entered);
+
+        let waiter_service = Arc::clone(&service);
+        let waiter_remote = Arc::clone(&remote);
+        let (result_tx, result_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let icon = waiter_service.feed_icon_with_deadline(
+                42,
+                waiter_remote.as_ref(),
+                Some(Instant::now() + Duration::from_millis(20)),
+            );
+            result_tx.send(icon).unwrap();
+        });
+        assert!(
+            result_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("icon waiter ignored its deadline")
+                .regular
+                .is_empty()
+        );
+
+        *remote.release.0.lock().unwrap() = true;
+        remote.release.1.notify_all();
+        assert!(leader.join().unwrap().regular.is_empty());
     }
 
     fn dark_mode_variant_with_analysis(

@@ -6,13 +6,13 @@
 //! contract. Validation errors use the shared localization catalogs.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Weak};
 
 use crate::domain::account::account_id;
 use crate::domain::selection::Selection;
 use crate::persistence::Store;
 use crate::remote::MinifluxClient;
-use crate::sync::{SyncResult, SyncService};
+use crate::sync::{SharedStore, SyncResult, SyncService};
 use crate::transport::response::{BrowseSnapshot, Icon, Response};
 
 struct Config {
@@ -28,6 +28,8 @@ struct Session {
 
 pub struct AppRuntime {
     session: Mutex<Option<Session>>,
+    store: Mutex<Option<Arc<SharedStore>>>,
+    services: Mutex<Vec<(String, Weak<SyncService>)>>,
     database_path_override: Option<PathBuf>,
 }
 
@@ -41,6 +43,8 @@ impl AppRuntime {
     pub const fn new() -> Self {
         Self {
             session: Mutex::new(None),
+            store: Mutex::new(None),
+            services: Mutex::new(Vec::new()),
             database_path_override: None,
         }
     }
@@ -49,6 +53,8 @@ impl AppRuntime {
     pub fn with_database_path(path: PathBuf) -> Self {
         Self {
             session: Mutex::new(None),
+            store: Mutex::new(None),
+            services: Mutex::new(Vec::new()),
             database_path_override: Some(path),
         }
     }
@@ -80,20 +86,32 @@ impl AppRuntime {
                 Err(error) => return Response::error(error),
             },
         };
-        let store = match Store::open(&path) {
-            Ok(store) => store,
-            Err(error) => return Response::error(format!("SQLite öffnen: {error}")),
+        let store = {
+            let mut current = locked(&self.store);
+            match current.as_ref() {
+                Some(store) => Arc::clone(store),
+                None => {
+                    let opened = match Store::open(&path) {
+                        Ok(store) => SharedStore::new(store),
+                        Err(error) => {
+                            return Response::error(format!("SQLite öffnen: {error}"));
+                        }
+                    };
+                    *current = Some(Arc::clone(&opened));
+                    opened
+                }
+            }
         };
         if let Err(error) = store.ensure_account(&derived_account, &normalized_server) {
-            return Response::error(error.to_string());
+            return Response::error(error);
         }
 
         let remote = match MinifluxClient::new(&normalized_server, trimmed_key) {
             Ok(remote) => remote,
             Err(error) => return Response::error(error.to_string()),
         };
-        let engine = SyncService::new(
-            store,
+        let candidate = SyncService::with_shared_store(
+            Arc::clone(&store),
             Box::new(remote),
             derived_account.clone(),
             newest_first,
@@ -104,6 +122,24 @@ impl AppRuntime {
             .as_ref()
             .is_none_or(|existing| generation >= existing.config.generation)
         {
+            let mut services = locked(&self.services);
+            let retained = services
+                .iter()
+                .find(|(account_id, _)| account_id == &derived_account)
+                .and_then(|(_, service)| service.upgrade());
+            let engine = retained.unwrap_or(candidate);
+            engine.set_newest_first(newest_first);
+            services.retain(|(account_id, service)| {
+                account_id == &derived_account || service.strong_count() > 0
+            });
+            if let Some((_, service)) = services
+                .iter_mut()
+                .find(|(account_id, _)| account_id == &derived_account)
+            {
+                *service = Arc::downgrade(&engine);
+            } else {
+                services.push((derived_account.clone(), Arc::downgrade(&engine)));
+            }
             *guard = Some(Session {
                 config: Config {
                     account_id: derived_account,
@@ -123,13 +159,12 @@ impl AppRuntime {
         unread_only: bool,
         retain_entry_ids: &[i64],
     ) -> Response {
-        let guard = locked(&self.session);
-        let Some(session) = guard.as_ref() else {
+        let Some(engine) = self.current_engine() else {
             return Response::not_configured();
         };
 
         let selection = Selection::normalize(kind, id, unread_only);
-        match session.engine.local_snapshot(&selection, retain_entry_ids) {
+        match engine.local_snapshot(&selection, retain_entry_ids) {
             Ok(data) => snapshot_response(data),
             Err(error) => Response::error(error.to_string()),
         }
@@ -251,11 +286,8 @@ impl AppRuntime {
         let Some(engine) = self.current_engine() else {
             return Response::not_configured();
         };
-        if let Err(error) = engine.flush() {
-            return Response::error(error);
-        }
         let selection = Selection::normalize(kind, id, unread_only);
-        match engine.local_snapshot(&selection, retain_entry_ids) {
+        match engine.flush_and_snapshot(&selection, retain_entry_ids) {
             Ok(data) => snapshot_response(data),
             Err(error) => Response::error(error),
         }
@@ -410,6 +442,60 @@ fn default_database_path() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::{
+        CategoryDto, EntriesFilter, EntryDto, FeedCountersDto, FeedDto, RemoteError, RemoteInbox,
+    };
+
+    struct BlockingRemote {
+        entered: std::sync::mpsc::Sender<()>,
+        release: Mutex<std::sync::mpsc::Receiver<()>>,
+        entries: Vec<EntryDto>,
+    }
+
+    impl RemoteInbox for BlockingRemote {
+        fn fetch_complete_selection(
+            &self,
+            _filter: &EntriesFilter,
+        ) -> Result<(Vec<EntryDto>, i64), RemoteError> {
+            Ok((self.entries.clone(), self.entries.len() as i64))
+        }
+
+        fn categories(&self) -> Result<Vec<CategoryDto>, RemoteError> {
+            Ok(Vec::new())
+        }
+
+        fn feeds(&self) -> Result<Vec<FeedDto>, RemoteError> {
+            Ok(Vec::new())
+        }
+
+        fn unread_counters(&self) -> Result<FeedCountersDto, RemoteError> {
+            self.entered.send(()).unwrap();
+            locked(&self.release).recv().unwrap();
+            Ok(FeedCountersDto {
+                unreads: std::collections::HashMap::new(),
+            })
+        }
+
+        fn starred_total(&self) -> Result<i64, RemoteError> {
+            Ok(0)
+        }
+
+        fn icon_data_url(&self, _feed_id: i64) -> Result<Option<String>, RemoteError> {
+            Ok(None)
+        }
+
+        fn set_read_batch(&self, _entry_ids: &[i64], _read: bool) -> Result<(), RemoteError> {
+            Ok(())
+        }
+
+        fn entry_starred(&self, _entry_id: i64) -> Result<bool, RemoteError> {
+            Ok(false)
+        }
+
+        fn toggle_starred(&self, _entry_id: i64) -> Result<(), RemoteError> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn validation_matches_go_fallback_messages() {
@@ -550,6 +636,131 @@ mod tests {
         let response = runtime.local_snapshot("all", 0, true, &[]);
         assert!(!response.ok);
         assert_eq!(response.error, "Miniflux is not configured");
+    }
+
+    #[test]
+    fn configure_during_blocked_refresh_keeps_work_account_bound() {
+        let directory = test_directory();
+        let database_path = directory.path().join("inbox.sqlite3");
+        let runtime = std::sync::Arc::new(AppRuntime::with_database_path(database_path.clone()));
+        let account_a = account_id("https://a.example", "a");
+        let store = Store::open(&database_path).unwrap();
+        store
+            .ensure_account(&account_a, "https://a.example")
+            .unwrap();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let engine = SyncService::new(
+            store,
+            Box::new(BlockingRemote {
+                entered: entered_tx,
+                release: Mutex::new(release_rx),
+                entries: vec![EntryDto {
+                    id: 7,
+                    feed_id: 20,
+                    title: "Account A entry".to_string(),
+                    url: "https://a.example/7".to_string(),
+                    comments_url: String::new(),
+                    status: "unread".to_string(),
+                    starred: false,
+                    published_at: "2026-08-23T10:00:00Z".to_string(),
+                    content: String::new(),
+                    enclosures: Vec::new(),
+                    feed: None,
+                }],
+            }),
+            account_a.clone(),
+            false,
+        );
+        *locked(&runtime.store) = Some(engine.shared_store());
+        *locked(&runtime.session) = Some(Session {
+            config: Config {
+                account_id: account_a.clone(),
+                generation: 1,
+            },
+            engine,
+        });
+
+        let refreshing = std::sync::Arc::clone(&runtime);
+        let refresh = std::thread::spawn(move || refreshing.refresh("all", 0, true, &[]));
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+
+        assert!(
+            runtime
+                .configure("https://b.example", "b", false, 2, &[])
+                .ok
+        );
+        let account_b = account_id("https://b.example", "b");
+        assert_eq!(
+            locked(&runtime.session).as_ref().unwrap().config.account_id,
+            account_b
+        );
+        assert!(runtime.local_snapshot("all", 0, true, &[]).ok);
+
+        release_tx.send(()).unwrap();
+        assert!(refresh.join().unwrap().ok);
+        assert_eq!(
+            locked(&runtime.session).as_ref().unwrap().config.account_id,
+            account_b
+        );
+
+        let database = rusqlite::Connection::open(database_path).unwrap();
+        let account_count: i64 = database
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(account_count, 2);
+        let entry_accounts: Vec<String> = database
+            .prepare("SELECT account_id FROM entries WHERE id=7 ORDER BY account_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(entry_accounts, vec![account_a]);
+    }
+
+    #[test]
+    fn same_account_reconfigure_retains_serialization_service() {
+        let directory = test_directory();
+        let runtime = AppRuntime::with_database_path(directory.path().join("inbox.sqlite3"));
+        assert!(
+            runtime
+                .configure("https://a.example", "key", false, 1, &[])
+                .ok
+        );
+        let first = runtime.current_engine().unwrap();
+
+        assert!(
+            runtime
+                .configure("https://a.example/", " key ", true, 2, &[])
+                .ok
+        );
+        let second = runtime.current_engine().unwrap();
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn account_round_trip_reuses_a_retained_service() {
+        let directory = test_directory();
+        let runtime = AppRuntime::with_database_path(directory.path().join("inbox.sqlite3"));
+        assert!(
+            runtime
+                .configure("https://a.example", "a", false, 1, &[])
+                .ok
+        );
+        let first_a = runtime.current_engine().unwrap();
+        assert!(
+            runtime
+                .configure("https://b.example", "b", false, 2, &[])
+                .ok
+        );
+        assert!(runtime.configure("https://a.example", "a", true, 3, &[]).ok);
+        let second_a = runtime.current_engine().unwrap();
+
+        assert!(Arc::ptr_eq(&first_a, &second_a));
     }
 
     struct TestDirectory(std::path::PathBuf);

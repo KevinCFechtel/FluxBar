@@ -1054,3 +1054,58 @@ Accepted bounded differences remain parser-specific malformed-JSON detail,
 Rust's safer FFI panic containment, and simplified locale matching for the
 actual English/German Apple locale lists. Arbitrary Accept-Language syntax and
 every malformed URL form are not claimed equivalent.
+
+## Phase 10.1 concurrency findings
+
+The Phase 10 orchestration blocker was remediated on 2026-08-23. The observable
+concurrency contract is:
+
+- refresh and pending flush are serialized for one retained account service;
+- local snapshots and optimistic read/star/Undo/discard mutations do not wait
+  for remote refresh, remote flush, or icon network work;
+- one runtime-wide SQLite connection is shared by retained account services and
+  used by one operation at a time; its ownership wait is deadline-aware and
+  deadline checks surround subsequent synchronous database calls;
+- a pending mutation is acknowledged only at its delivered revision, so a
+  concurrent superseding local value survives an older remote completion;
+- icon cache and same-feed single-flight coordination are separate from sync
+  and store ownership; each waiter has its own deadline;
+- reconfiguration publishes a new service, while work already holding the old
+  service remains bound to its original account, database, and remote client;
+- same-account reconfiguration retains its existing service/sync gate and
+  updates only generation and sort preference, preventing duplicate delivery;
+- returning to an account reuses any service still retained by in-flight or
+  delayed work, so an A-to-B-to-A sequence cannot create concurrent A gates;
+- delayed flush scheduling is resettable and account-bound; an immediate
+  manual mutation advances earlier automatic work without duplicate delivery.
+
+Rust's refresh/flush serial-gate wait is deadline-aware. Go's `syncMu` wait is
+not context-cancellable, so this is an accepted bounded internal safety
+difference: timed-out Rust work returns an operation error and does not execute
+later, while successful call ordering and all wire/persistence semantics remain
+compatible.
+
+`rusqlite` statements/transactions and icon decoding/rasterization are
+synchronous library calls and cannot be interrupted in the middle. Rust checks
+the absolute deadline immediately after them and does not cache an icon whose
+processing completed late. Local mutation scheduling occurs immediately after
+transaction commit, before snapshot/deadline checks, so a caller-visible
+timeout cannot leave committed pending work unscheduled. If the operating
+system refuses worker-thread creation, the deadline remains queued and a later
+scheduling event retries worker creation; this resource-exhaustion case cannot
+guarantee immediate delivery.
+
+## Phase 10.2 development-default conclusion
+
+The 2026-08-23 readiness re-check found no high- or medium-severity concurrency
+or contract regression in the Phase 10.1 implementation. The state-scoped
+synchronization, account-bound retained services, shared SQLite ownership,
+deadline behavior, C/JSON ABI, and Go/Rust persistence contract are sufficient
+for Rust to become the normal FluxBar development core in Phase 11. Go remains
+the behavioral reference/fallback until a later explicit phase changes that
+decision.
+
+FluxBar has no public Go-backed installed base. A clean Rust-backed first
+release does not require a Go-to-Rust end-user data migration path. Existing
+bidirectional SQLite tests remain required compatibility and regression-oracle
+coverage; this FluxBar-only conclusion does not imply a policy for FluxNews.

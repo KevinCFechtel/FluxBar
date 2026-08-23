@@ -346,10 +346,11 @@ adapters:
 -   real public `refresh`, `set_read`, `set_starred`, `undo_read`,
     `discard_undo`, and `flush_pending` handlers.
 
-The scheduler serializes SQLite and remote activity for each service. This is
-stricter than Go's separate sync/timer/DB locking but preserves operation
-ordering, prevents concurrent use of a `rusqlite::Connection`, and keeps old
-configuration callbacks bound to their original account. No async runtime was
+Refresh and pending flush are serialized per account service, matching Go's
+`syncMu` ordering. SQLite ownership, delayed-worker state, and icon
+single-flight state are separate, so local snapshots and mutations and
+unrelated icon loads do not wait behind remote I/O. Delayed callbacks retain
+their original account service after reconfiguration. No async runtime was
 introduced.
 
 `Build/test-sync-compat.sh` executes identical operation sequences against Go
@@ -486,6 +487,83 @@ core builds, both 16-test native XCTest runs, and the built-in
 layout with a synthetic snapshot; it does not exercise live core startup or
 the manual product scenarios above. Live configuration, offline behavior,
 startup scheduling, and restart persistence remain outstanding manual checks.
+
+### Phase 10.1 concurrency result (2026-08-23)
+
+**Decision: READY WITH RESERVATIONS for controlled Rust-backed development
+evaluation.** The broad service mutex was replaced by state-scoped ownership:
+
+-   a deadline-aware serial gate covers refresh and pending flush only;
+-   a separate deadline-aware lock owns the runtime-wide SQLite connection and
+    is shared by retained old and current account services;
+-   icon cache/single-flight and delayed-worker state are independently
+    synchronized;
+-   account identity and remote client are immutable on each retained account
+    service; same-account configuration updates only generation and the atomic
+    sort preference so it cannot create a second flush gate;
+-   a weak account-service registry reuses retained work across an A-to-B-to-A
+    round trip, while allowing an inactive old service to be reclaimed;
+-   runtime configuration publishes a replacement service without redirecting
+    in-flight or delayed work from the old service.
+
+Rust now matches the relevant Go concurrency semantics: remote refresh/flush
+remain ordered, local snapshots and optimistic mutations can proceed while
+remote or icon work is blocked, pending revisions protect superseding local
+state, and unrelated icon and sync requests can overlap. Absolute operation
+deadlines include waits for SQLite and refresh/flush ownership, with checks
+around synchronous SQLite and image-processing calls. Those calls cannot be
+interrupted mid-call; committed pending work is scheduled before a later
+deadline check can report failure. Same-feed icon waiters use their own
+deadline. No unsafe `Send`/`Sync`, async runtime, UniFFI, or bridge/schema
+change was introduced.
+
+Deterministic blocked-operation tests cover refresh plus local work, icon plus
+local/sync work, flush plus superseding mutation, refresh plus flush,
+refresh plus refresh, flush plus flush, automatic/manual scheduler races,
+same-feed icon waiter expiry, configure during a blocked refresh, and retained
+service reuse across direct and round-trip configuration. The full
+Phase 10 parity suite, 2,073-response ABI differential, Go race checks, Rust
+tests, universal core artifacts, all three app builds, and a Rust-linked launch
+smoke passed on 2026-08-23.
+
+This result removes the Phase 10 concurrency blocker but does not switch any
+default. Go remains production/reference and release-pinned; Rust remains an
+explicit experimental build. Live configuration, offline, startup scheduling,
+and restart-persistence product checks listed above remain reservations before
+any Phase 11 default change.
+
+### Phase 10.2 development-default readiness re-check (2026-08-23)
+
+**Decision: READY FOR DEVELOPMENT DEFAULT.** Independent review of the actual
+Phase 10.1 code confirmed that no broad runtime/service lock remains across
+remote or icon work. The runtime captures an account-bound service before work,
+the shared SQLite owner serializes only database use, the per-service gate
+serializes refresh and flush, and icon cache/single-flight state is independent.
+The retained-service registry prevents duplicate gates for both direct
+same-account configuration and A-to-B-to-A returns while older work is alive.
+
+The current full Rust suite (122 tests), focused parallel concurrency suite,
+Go tests/vet and ten inbox race repetitions, all eight parity suites,
+2,073-response ABI differential, arm64/x86_64 core artifact smoke builds, and
+default/explicit-Go/explicit-Rust application builds passed on 2026-08-23. A
+Rust-linked application launch smoke also passed. The core-artifact build
+scripts compile and invoke the required C ABI symbols; a separate `nm` listing
+is not reliable with the installed Apple LLVM reader and Rust 1.98 object
+attributes.
+
+FluxBar has no public Go-backed installed base. A clean Rust-backed first
+public installation is therefore sufficient: Go/Rust SQLite interoperability
+remains compatibility and regression-oracle coverage, not an end-user upgrade
+requirement. This statement applies to FluxBar only, not to any future FluxNews
+migration.
+
+Remaining work is not a development-default core blocker: live configuration,
+offline behavior, startup scheduling, and restart persistence are manual
+pre-1.0 product-hardening checks. The synchronous SQLite/image deadline limits
+and rare scheduler-thread-creation retry behavior remain documented bounded
+limitations. Phase 11 may switch the normal development build to Rust while
+retaining Go as reference/fallback. This re-check does not perform that switch,
+does not alter the Go-backed release path, and does not remove Go.
 
 ## Phase 11 --- Rust becomes development default
 
