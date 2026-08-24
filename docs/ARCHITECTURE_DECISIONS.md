@@ -150,6 +150,37 @@ Opening the popover must not require a successful Miniflux request.
 Render current SQLite state immediately, then synchronize in the
 background.
 
+### Persistent core state is independent from presentation state
+
+Synchronization may update the persistent core state — including entries,
+counters, remote baselines, and reconciliation metadata — without replacing
+the snapshot currently presented by a native client.
+
+An active article list is presentation state owned by the client. It changes
+only when the client explicitly requests and adopts a new snapshot.
+
+This separation allows background synchronization to prepare current data
+without disturbing a timeline the user is actively reading.
+
+### Sync is not UI refresh
+
+Remote synchronization and presentation refresh are separate operations.
+
+A background sync may fetch and persist new remote data while the visible
+timeline and displayed counters remain unchanged. A later user-initiated
+refresh may adopt the already-current local state without requiring another
+network request.
+
+The client owns refresh policy. Depending on freshness and product context,
+it may:
+
+- adopt the latest local snapshot immediately;
+- trigger remote synchronization and then adopt a snapshot; or
+- keep the current presentation unchanged.
+
+Do not couple successful synchronization, mutations, or persistence changes
+to implicit replacement of an active presentation snapshot.
+
 ### Miniflux remains the remote source of truth
 
 Local state exists for responsiveness, resilience, and synchronization.
@@ -279,6 +310,12 @@ separate limits.
 Delayed work may retain its original account service after reconfiguration,
 but can never use the replacement account's store or remote client. Pending
 revision acknowledgement must preserve a newer concurrent local value.
+
+Core mutation, query, synchronization, and presentation responsibilities must
+remain separable. Commands must not implicitly replace a client's active
+presentation snapshot, and synchronization may advance persistent state without
+forcing presentation state to advance with it. See
+`CORE_COMMAND_QUERY_SEPARATION.md`.
 
 After mobile runtime and API behavior are characterized, C/JSON, a typed C ABI,
 and UniFFI may be evaluated as mobile adapters. That decision is independent

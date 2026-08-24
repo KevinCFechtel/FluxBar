@@ -1,6 +1,10 @@
 //! Blocking Miniflux HTTP client reproducing the Go client's wire behavior.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use rustls_platform_verifier::BuilderVerifierExt;
+use ureq::rustls;
 
 use crate::remote::RemoteInbox;
 use crate::remote::dto::{
@@ -19,8 +23,37 @@ pub const STATUS_UNREAD: &str = "unread";
 pub const STATUS_READ: &str = "read";
 pub const FILTER_ONLY_STARRED: &str = "1";
 
-/// Blocking Miniflux API v1 client using the system trust store via
-/// native-tls (Security.framework on macOS), matching Go's transport trust.
+/// Builds a shared ureq agent configured with the platform TLS verifier.
+///
+/// Shared with the mobile runtime proof so the HTTPS probe exercises the same
+/// transport configuration as production Miniflux requests.
+///
+/// On iOS/macOS this uses Security.framework; on Android it uses the system
+/// Trust Manager once the Android component is initialized; on Linux it falls
+/// back to rustls-native-certs. If the platform verifier cannot be configured,
+/// the error is surfaced as a transport error so tests and callers can see it.
+pub(crate) fn build_http_agent() -> Result<ureq::Agent, RemoteError> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let tls_config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| RemoteError::Transport(format!("tls protocol init failed: {e}")))?
+        .with_platform_verifier()
+        .map_err(|e| RemoteError::Transport(format!("tls verifier init failed: {e}")))?
+        .with_no_client_auth();
+
+    Ok(ureq::AgentBuilder::new()
+        .tls_config(Arc::new(tls_config))
+        .timeout(REQUEST_TIMEOUT)
+        // ureq counts the terminal response in this limit, so 10 matches
+        // Go http.Client's default limit of ten consecutive requests.
+        .redirects(10)
+        .build())
+}
+
+/// Blocking Miniflux API v1 client using the platform trust verifier
+/// (Security.framework on Apple platforms, Android Trust Manager, and
+/// rustls-native-certs fallback on Linux), matching Go's system-trust
+/// semantics more closely than rustls-native-certs alone.
 pub struct MinifluxClient {
     agent: ureq::Agent,
     endpoint: String,
@@ -39,12 +72,7 @@ impl MinifluxClient {
                 "miniflux: empty endpoint provided".to_string(),
             ));
         }
-        let agent = ureq::AgentBuilder::new()
-            .timeout(REQUEST_TIMEOUT)
-            // ureq counts the terminal response in this limit, so 10 matches
-            // Go http.Client's default limit of ten consecutive requests.
-            .redirects(10)
-            .build();
+        let agent = build_http_agent()?;
         Ok(Self {
             agent,
             endpoint: trimmed.to_string(),

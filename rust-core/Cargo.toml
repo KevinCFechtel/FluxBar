@@ -7,6 +7,13 @@ edition = "2024"
 name = "fluxcore"
 crate-type = ["staticlib", "rlib"]
 
+[features]
+default = []
+# Mobile runtime proof operations. Not part of the production FluxBar ABI;
+# gated so the probe code, extra request fields, and platform-verifier TLS
+# configuration do not affect normal macOS builds.
+mobile-runtime-proof = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -21,6 +28,11 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 # `native-tls` feature is an adapter that requires explicit AgentBuilder
 # configuration, so rustls is the supported automatic backend.
 ureq = { version = "2", features = ["tls", "native-certs"], default-features = false }
+# Platform-native TLS certificate verification. Replaces rustls-native-certs on
+# iOS/macOS (Security.framework) and Android (Trust Manager) while preserving
+# Linux fallback behavior through rustls-native-certs. Used by the shared HTTP
+# agent and by the mobile-runtime-proof HTTPS probe.
+rustls-platform-verifier = "0.6"
 # RFC3339Nano-compatible UTC timestamps for pending/Undo rows and sync state.
 time = { version = "=0.3.41", features = ["formatting"] }
 # HTML5 parser for Go-compatible article preview/image extraction (Phase 9.1).
@@ -48,6 +60,10 @@ log = { version = "0.4", features = ["release_max_level_info"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 # Minimal Unified Logging backend for the `log` facade on Apple platforms.
 oslog = { version = "0.2", features = ["logger"] }
+
+[dev-dependencies]
+# Temporary directories for the mobile-runtime-proof SQLite tests.
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

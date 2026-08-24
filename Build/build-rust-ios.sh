@@ -12,6 +12,7 @@ set -euo pipefail
 #
 # Environment:
 #   IPHONEOS_DEPLOYMENT_TARGET - iOS deployment target (default 17.0)
+#   CARGO_FEATURES             - comma-separated features passed to cargo build
 #
 # The script validates tools and targets, prints exact remediation, and never
 # installs Rust targets, Xcode SDKs, or other toolchain components automatically.
@@ -99,11 +100,25 @@ build_target() {
 
   local start_epoch="$(date +%s)"
   echo "Building ${target} (${PROFILE})..."
-  IPHONEOS_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" \
-    cargo build \
-      --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
-      --target "${target}" \
-      --profile "${PROFILE}"
+  local feature_args=()
+  if [[ -n "${CARGO_FEATURES:-}" ]]; then
+    feature_args+=(--features "${CARGO_FEATURES}")
+  fi
+
+  if [[ ${#feature_args[@]} -gt 0 ]]; then
+    IPHONEOS_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" \
+      cargo build \
+        --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
+        --target "${target}" \
+        --profile "${PROFILE}" \
+        "${feature_args[@]}"
+  else
+    IPHONEOS_DEPLOYMENT_TARGET="${DEPLOYMENT_TARGET}" \
+      cargo build \
+        --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
+        --target "${target}" \
+        --profile "${PROFILE}"
+  fi
   local end_epoch="$(date +%s)"
 
   local src_archive="${REPOSITORY_DIR}/rust-core/target/${target}/${PROFILE}/libfluxcore.a"
@@ -144,7 +159,8 @@ if [[ "${BUILD_INTEL_SIMULATOR}" == "1" ]]; then
   build_target "x86_64-apple-ios" "simulator-x86_64" "x86_64"
 fi
 
-cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/libfluxcore.h"
+mkdir -p "${OUTPUT_DIR}/Headers"
+cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/Headers/libfluxcore.h"
 
 rust_version="$(rustc --version)"
 cargo_version=""  # populated below if available

@@ -21,6 +21,10 @@ pub struct Response {
     pub icon: Option<Icon>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receipt: Option<Receipt>,
+    /// Feature-gated probe data. Only populated by `mobile_runtime_probe` and
+    /// omitted when absent to preserve the existing envelope shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 /// Wire-form article selection echoed in snapshots (normalized values).

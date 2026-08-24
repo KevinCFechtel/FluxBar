@@ -37,6 +37,8 @@ pub mod icons;
 pub mod localization;
 pub mod logging;
 pub mod persistence;
+#[cfg(feature = "mobile-runtime-proof")]
+pub mod probe;
 pub mod remote;
 pub mod runtime;
 pub mod snapshot;

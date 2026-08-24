@@ -48,6 +48,17 @@ const REQUEST_FIELDS: &[&str] = &[
     "desiredStarred",
     "feedID",
     "feedName",
+    "probeAction",
+    "probePayload",
+    "probeSize",
+    "probeAllowedRoot",
+    "probeDbFilename",
+    "probeKey",
+    "probeValue",
+    "probeUrl",
+    "probeTimeoutMs",
+    "probeIterations",
+    "probeConfirmPanic",
 ];
 
 /// Decodes the public envelope with Go encoding/json's case-insensitive
@@ -264,6 +275,83 @@ pub struct Request {
         deserialize_with = "deserialize_null_default"
     )]
     pub feed_name: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeAction",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_action: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probePayload",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_payload: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeSize",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_size: i64,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeAllowedRoot",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_allowed_root: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeDbFilename",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_db_filename: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeKey",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_key: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeValue",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_value: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeUrl",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_url: String,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeTimeoutMs",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_timeout_ms: i64,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeIterations",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_iterations: i64,
+    #[cfg(feature = "mobile-runtime-proof")]
+    #[serde(
+        default,
+        rename = "probeConfirmPanic",
+        deserialize_with = "deserialize_null_default"
+    )]
+    pub probe_confirm_panic: String,
 }
 
 impl Request {
@@ -326,6 +414,20 @@ impl Request {
                 one_fallback: self.one_fallback,
                 other_fallback: self.other_fallback,
                 count: self.count,
+            }),
+            #[cfg(feature = "mobile-runtime-proof")]
+            "mobile_runtime_probe" => Ok(Operation::MobileRuntimeProbe {
+                action: self.probe_action,
+                payload: self.probe_payload,
+                size: self.probe_size,
+                allowed_root: self.probe_allowed_root,
+                db_filename: self.probe_db_filename,
+                key: self.probe_key,
+                value: self.probe_value,
+                url: self.probe_url,
+                timeout_ms: self.probe_timeout_ms,
+                iterations: self.probe_iterations,
+                confirm_panic: self.probe_confirm_panic,
             }),
             "" => Err(r#"unsupported operation """#.to_string()),
             other => Err(format!(r#"unsupported operation "{other}""#)),
@@ -393,6 +495,20 @@ pub enum Operation {
         other_fallback: String,
         count: i64,
     },
+    #[cfg(feature = "mobile-runtime-proof")]
+    MobileRuntimeProbe {
+        action: String,
+        payload: String,
+        size: i64,
+        allowed_root: String,
+        db_filename: String,
+        key: String,
+        value: String,
+        url: String,
+        timeout_ms: i64,
+        iterations: i64,
+        confirm_panic: String,
+    },
 }
 
 #[cfg(test)]
@@ -411,6 +527,8 @@ impl Operation {
             Operation::FeedIcon { .. } => "feed_icon",
             Operation::Localize { .. } => "localize",
             Operation::LocalizePlural { .. } => "localize_plural",
+            #[cfg(feature = "mobile-runtime-proof")]
+            Operation::MobileRuntimeProbe { .. } => "mobile_runtime_probe",
         }
     }
 }

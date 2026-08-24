@@ -14,6 +14,7 @@ set -euo pipefail
 #   ANDROID_HOME                 - Android SDK root (required if NDK not given)
 #   FLUX_ANDROID_NDK             - NDK root path (optional; default derived)
 #   FLUX_ANDROID_API             - NDK API level for linkers (default 29)
+#   CARGO_FEATURES               - comma-separated features passed to cargo build
 #
 # The script validates tools and targets, prints exact remediation, and never
 # installs Rust targets, SDK/NDK components, or other toolchain parts automatically.
@@ -152,10 +153,24 @@ build_target() {
   export "${linker_var}=${clang}"
   export "${cc_var}=${clang}"
   export "${ar_var}=${BIN_DIR}/llvm-ar"
-  cargo build \
-    --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
-    --target "${target}" \
-    --profile "${PROFILE}"
+
+  local feature_args=()
+  if [[ -n "${CARGO_FEATURES:-}" ]]; then
+    feature_args+=(--features "${CARGO_FEATURES}")
+  fi
+
+  if [[ ${#feature_args[@]} -gt 0 ]]; then
+    cargo build \
+      --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
+      --target "${target}" \
+      --profile "${PROFILE}" \
+      "${feature_args[@]}"
+  else
+    cargo build \
+      --manifest-path "${REPOSITORY_DIR}/rust-core/Cargo.toml" \
+      --target "${target}" \
+      --profile "${PROFILE}"
+  fi
   local end_epoch="$(date +%s)"
 
   local src_archive="${REPOSITORY_DIR}/rust-core/target/${target}/${PROFILE}/libfluxcore.a"
@@ -193,7 +208,14 @@ build_target "aarch64-linux-android" "arm64-v8a" "arm64-v8a"
 build_target "x86_64-linux-android" "x86_64" "x86_64"
 build_target "armv7-linux-androideabi" "armeabi-v7a" "armeabi-v7a"
 
-cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/libfluxcore.h"
+mkdir -p "${OUTPUT_DIR}/Headers"
+cp "${REPOSITORY_DIR}/rust-core/libfluxcore.h" "${OUTPUT_DIR}/Headers/libfluxcore.h"
+cat > "${OUTPUT_DIR}/Headers/module.modulemap" <<'EOF'
+module FluxCore {
+    header "libfluxcore.h"
+    export *
+}
+EOF
 
 rust_version="$(rustc --version)"
 cargo_version="$(cargo --version)"

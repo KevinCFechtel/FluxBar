@@ -90,8 +90,8 @@ SQLite, HTTP/TLS, FFI, or concurrency primitive is defective.
 Before Phase 1 coding starts, the chosen integration branch must pass a locked
 Rust dependency check and the relevant Rust/ABI tests. During this audit the
 concurrent diagnostic work updated both the manifest and lockfile; the current
-lock now includes `log` and `oslog` (`rust-core/Cargo.lock:677-685`,
-`rust-core/Cargo.lock:903-920`). Phase 1 depends only on a clean, internally
+lock now includes `log` and `oslog` (`rust-core/Cargo.lock:701-709`,
+`rust-core/Cargo.lock:941-959`). Phase 1 depends only on a clean, internally
 consistent base revision, not on resolution of the signed-build sync problem or
 completion of the diagnostic task.
 
@@ -277,6 +277,7 @@ Per build profile, the implementation produces:
     jniLibs/arm64-v8a/libfluxcore_mobile_probe.so
     jniLibs/x86_64/libfluxcore_mobile_probe.so
     jniLibs/armeabi-v7a/libfluxcore_mobile_probe.so
+    verifier/rustls-platform-verifier-0.1.1.aar
     include/libfluxcore.h
     manifest.json
 ```
@@ -284,6 +285,9 @@ Per build profile, the implementation produces:
 The `.so` is the host-loadable artifact. Adding `cdylib` to the production
 crate is not required merely to prove Android integration. The JNI shim is
 probe-host infrastructure and must not be treated as the final Kotlin binding.
+The proof host packages the exact AAR shipped by locked
+`rustls-platform-verifier-android 0.1.1`, records its SHA-256, and pins the local
+Gradle dependency rather than using `latest.release`.
 
 The manifest records the same reproducibility information as iOS plus NDK
 version, API level, ABI, ELF architecture, required shared libraries, SHA-256,
@@ -318,6 +322,8 @@ Use a tiny Kotlin Android application plus instrumentation tests:
 - one non-exported test-oriented Activity where practical, with a minimal
   status list and manual lifecycle controls;
 - `System.loadLibrary("fluxcore_mobile_probe")`;
+- one process-idempotent native initializer that passes the application context
+  to `rustls-platform-verifier` before any request can perform HTTPS;
 - one Kotlin wrapper over the JNI string-in/string-out function;
 - app-private `noBackupFilesDir` for the probe database;
 - INTERNET permission only;
@@ -335,6 +341,15 @@ they add no runtime-proof evidence.
 
 Reuse `FluxCoreRequest` and `FluxCoreFree`. Do not introduce typed C or UniFFI.
 Do not add a third exported production symbol.
+
+Android requires one feature-gated `extern "system"` JNI initialization method
+in proof-host glue because the verifier needs `JNIEnv`, `JavaVM`, class loader,
+and an application `Context`; those cannot be passed safely through JSON or
+obtained from `JNI_OnLoad` alone. This method calls the verifier's idempotent
+Android initializer before any HTTPS-capable request. It is not named
+`FluxCore*`, is absent from default artifacts, and does not change the two-symbol
+production C ABI. The host must surface initialization failure before enabling
+HTTPS tests.
 
 A non-default Cargo feature named conceptually `mobile-runtime-proof` adds one
 reserved test-only JSON operation to the existing request path. The exact
@@ -440,6 +455,13 @@ expose all FluxBar operations to host UI.
 - C/JSON as the final Swift/Kotlin binding; or
 - JNI shim shape as the final Android API.
 
+The roadmap's host-supplied cache-path criterion is explicitly **not
+applicable** to this runtime proof. The current Rust feed-icon cache is
+process-memory-only (`docs/features/SYNC_AND_DATA.md:154-159`), while article
+image filesystem caches remain native platform/application storage work. Phase
+1 proves host-supplied database-root handling and must not invent a filesystem
+cache API solely to satisfy that wording.
+
 ## Dependency portability audit
 
 The classifications describe Phase 1 evidence needs, not replacement decisions.
@@ -454,15 +476,20 @@ The classifications describe Phase 1 evidence needs, not replacement decisions.
 | `image` codecs | `MOBILE SAFE` | Rust codecs with synchronous CPU/memory work. Do not add image product tests; record linked/dead-stripped size and defer memory-pressure image workloads. |
 | `resvg`/`usvg`/`tiny-skia` | `MOBILE SAFE` | Pure Rust/C-free configured graph with default text/font features disabled. Packaging and size evidence only. |
 | `rusqlite` + bundled `libsqlite3-sys` | `REQUIRES CONFIGURATION` | Requires Apple SDK or NDK C toolchain/linker. Prove all targets build and real devices create WAL, persist, close/reopen, and relaunch. |
-| `ureq` blocking client | `REQUIRES CONFIGURATION` | Must run off UI thread. Prove valid HTTPS, invalid certificate rejection, DNS/error mapping, and bounded timeout. Record that host task cancellation cannot interrupt an in-flight blocking call. |
-| `native-tls` on iOS | `REQUIRES CONFIGURATION` | Backend selection is source-proven to use Apple's Security framework. Final static linkage, package integration, and OS trust remain runtime tests on simulator and physical iPhone; macOS flags are not assumed sufficient. |
-| `native-tls`/OpenSSL on Android | `REQUIRES CONFIGURATION` | Backend selection is source-proven to use OpenSSL and load Android's system certificate directory. Current lock contains `openssl`/`openssl-sys` without vendored `openssl-src`; NDK cross-build, OpenSSL provisioning, certificate availability, packaging, and public-root behavior remain mandatory runtime tests. If unacceptable, Phase 1 is NOT PASSED for the current stack and an explicit TLS decision is required. |
+| `ureq 2.12.1` + `rustls 0.23.43` | `REQUIRES CONFIGURATION` | The shared agent installs an explicit `rustls-platform-verifier`; it must run off UI threads. Prove valid HTTPS, invalid certificate rejection, DNS/error mapping, TLS 1.2/1.3, and bounded timeout. Record that host task cancellation cannot interrupt an in-flight blocking call. |
+| `rustls-platform-verifier 0.6.2` on iOS | `REQUIRES CONFIGURATION` | Source dispatch selects Apple's Security.framework verifier for Apple vendors. Verify final `Security`/`CoreFoundation` linkage, static package integration, hostname checks, and OS trust on simulator and physical iPhone. |
+| `rustls-platform-verifier 0.6.2` on Android | `REQUIRES CONFIGURATION` | Source dispatch uses Android `X509TrustManagerExtensions` through JNI. Package locked support AAR `0.1.1`, initialize once per process with application context before HTTPS, retain its classes in release/R8, and prove system trust plus hostname rejection on emulator/device. No OpenSSL library or CA bundle should be required. |
+| ureq `native-certs` / `rustls-native-certs 0.7.3` | `UNKNOWN / MUST TEST` | The explicit platform verifier controls handshakes, but `AgentBuilder::new()` constructs ureq's default configuration first. On iOS/Android this transitive crate probes Unix certificate-file locations via `openssl-probe` (which is a file locator, not OpenSSL). Measure startup behavior and either prove this discarded initialization harmless or remove the redundant feature with full desktop/mobile TLS regression evidence. |
 | `log` facade | `REQUIRES CONFIGURATION` | Portable, process-global facade. Current non-macOS backend is no-op. Proof results belong in native test UI/files, not core production logs. |
 | `oslog` | `MOBILE SAFE` by exclusion | Gated to macOS and should not enter iOS/Android artifacts. Verify dependency manifests/link maps. Do not broaden it during Phase 1. |
 | Complete transitive graph | `UNKNOWN / MUST TEST` | Cargo metadata does not prove target linking. Build/link/run every required target and record native dependencies. |
 
-No audited dependency is pre-classified `REQUIRES REPLACEMENT`. Android TLS is
-the primary candidate that may earn that classification from Phase 1 evidence.
+No audited dependency is pre-classified `REQUIRES REPLACEMENT`. The selected
+platform verifier is an explicit shared transport change, not proof-only code:
+the proof must therefore test normal FluxBar HTTP behavior and must not claim
+that the `mobile-runtime-proof` feature isolates the verifier dependency or
+agent configuration. Android verifier initialization/packaging failure makes
+Phase 1 NOT PASSED pending an explicit transport decision.
 
 ## Mobile SQLite runtime proof
 
@@ -571,13 +598,19 @@ against the stable mobile repository.
 | Force terminate and relaunch persistence | Script/UI-assisted | Recorded | Physical result required |
 | Main-thread short `runtime_info` call | Automated | Smoke | Required |
 | SQLite/HTTPS on host background queue | Automated | Recorded | Required |
-| Memory warning | Best-effort simulator/device injection | Recorded observation if available | Non-gating; no crash observed during stress is required |
+| Bounded memory-stress workload | Automated allocation/large-response stress | Recorded Instruments/RSS workload | Required; an actual OS memory-warning callback is recorded when available but is not independently gating |
 | Simulator arm64 artifact execution | Automated | Not applicable | Required |
 | Intel simulator execution | Only when Intel host exists | Not applicable | Non-gating |
 
 iOS suspension duration is OS-controlled and not deterministic. Phase 1 records
 what occurs during ordinary background/foreground transitions; it does not
 claim BGTask execution or guaranteed completion while suspended.
+
+The physical iPhone checklist also requires a locked-device observation after
+first unlock: commit/read the probe value, background the app, lock the device,
+wait at least 60 seconds, unlock/foreground, and read again. This proves the
+chosen proof-file protection and ordinary suspension path, not Keychain access,
+cold-boot-before-first-unlock behavior, or BGTask execution.
 
 ### Android
 
@@ -589,12 +622,22 @@ claim BGTask execution or guaranteed completion while suspended.
 | Activity recreation | `ActivityScenario.recreate()` | Optional confirmation | Emulator required |
 | Background/foreground | Instrumentation/UI-assisted | Recorded | Physical result required |
 | `am force-stop`/process death and relaunch persistence | Scripted emulator | Recorded | Both required |
+| Screen lock while backgrounded, then unlock/read | Optional emulator | Recorded | Physical result required |
 | SQLite/HTTPS from background executor/coroutine dispatcher | Automated | Recorded | Required |
 | x86_64 emulator execution | Automated | Not applicable | Required |
 | armeabi-v7a package/load | Build/link/package inspection | Runtime when hardware exists | Artifact gate; runtime residual risk may remain recorded |
 
 No test claims WorkManager, widget, media service, or Android Auto lifecycle
 parity.
+
+### Repeated initialization mapping
+
+The roadmap's repeated-initialization criterion means ten probe SQLite
+open/write/read/close/reopen cycles in one process, native host UI/controller
+recreation, and three full process terminate/relaunch/read cycles. Android also
+records idempotent process-local `System.loadLibrary` use. The iOS artifact is
+statically linked and the Rust runtime has no production shutdown API, so Phase
+1 does not claim dynamic unload/reload or reset of all process-global Rust state.
 
 ## HTTP/TLS runtime proof
 
@@ -611,7 +654,7 @@ A controlled endpoint must provide fixed paths for:
 | --- | --- |
 | Publicly trusted certificate and valid hostname | DNS resolves, TLS succeeds, expected fixed status/body digest returns |
 | Hostname mismatch or self-signed/untrusted certificate | Request fails certificate validation; no bypass is available |
-| Delayed response beyond probe timeout | Request fails within documented tolerance and does not hang indefinitely |
+| Delayed response beyond probe timeout | Request fails no earlier than 90 percent of the requested timeout and no later than the timeout plus the larger of two seconds or 25 percent; it does not hang indefinitely |
 | Nonexistent DNS name | Typed/recorded transport failure without process crash |
 | Fixed nonsecret request header | Server confirms transport can send a header without using Miniflux credentials |
 
@@ -623,7 +666,8 @@ The proof records, without requiring support:
 
 - behavior behind the test environment's HTTP proxy;
 - whether a device-installed user CA is visible;
-- whether Android Network Security Config affects Rust/OpenSSL trust; and
+- whether Android Network Security Config affects the platform Trust Manager;
+  and
 - any custom-CA packaging required by the current stack.
 
 The Android host must not enable cleartext traffic. Current Flutter FluxNews
@@ -631,11 +675,19 @@ allows cleartext and trusts system/user certificates in its native network
 configuration (`FluxNews/android/app/src/main/res/xml/network_security_config.xml:1-9`),
 but that policy does not prove or dictate the future Rust transport policy.
 
-Phase 1 passes TLS only if the public-root case succeeds and the invalid-
-certificate case fails on both physical platforms without disabled
-verification. If Android OpenSSL cannot be packaged or cannot establish an
-acceptable trust source, the result is NOT PASSED pending an explicit transport
-decision.
+The Android host must initialize the verifier from application context before
+constructing the first HTTP agent. Required cases include cold process startup,
+repeated idempotent initialization, Activity recreation, force-stop/relaunch,
+background-worker HTTPS, and a release/R8 build. The packaged verifier class
+must load in each case; a panic or generic internal FFI error is not an
+acceptable substitute for an initialization error.
+
+Phase 1 passes TLS only if TLS 1.2 and TLS 1.3 public-root cases succeed and the
+invalid-certificate/hostname cases fail on both physical platforms without
+disabled verification. The final iOS link map must include Security and
+CoreFoundation. The Android package must include the pinned verifier AAR classes
+and must not require an OpenSSL shared library, private CA bundle, or insecure
+bypass. Failure is NOT PASSED pending an explicit transport decision.
 
 ## Concurrency and threading proof
 
@@ -703,8 +755,8 @@ Required ownership tests:
 - `FluxCoreFree(NULL)` remains a no-op;
 - success, malformed/error, panic, empty, Unicode, and one bounded large
   response follow the same free path;
-- 10,000 small sequential calls complete without a monotonic native/Rust heap
-  increase outside a documented tolerance;
+- 10,000 small sequential calls complete within the fixed retained-memory gate
+  below;
 - concurrent response pointers remain independent; and
 - process remains usable after ownership and panic stress.
 
@@ -719,6 +771,23 @@ sanitizer/HWASan configuration where supported by the selected emulator/device.
 Tool incompatibility may be recorded, but ownership stress and no observed
 leak/crash remain mandatory. The report must not claim absence of all memory
 defects solely from these tools.
+
+The fixed retained-memory gate is: in a fresh host process run 1,000 warm-up
+calls, quiesce for five seconds, record native heap and resident size, run
+10,000 calls, quiesce again, and repeat the complete fresh-process trial three
+times. No tool may report definitely leaked allocations attributable to the
+wrapper/core. For both resident size and native heap independently, the median
+final increase must be no greater than the larger of 8 MiB or 10 percent of its
+post-warm-up value. Any larger retained allocation is NOT PASSED unless an
+allocation-trace rerun proves it is unrelated host/tool noise and the independent
+Phase 1 reviewer accepts that evidence before the final gate.
+
+The physical-device stress workload additionally performs 100 sequential 1 MiB
+responses, freeing each response before the next call, while Instruments or the
+platform native-memory profiler records peak and post-quiescence memory. It must
+not crash, terminate, or exceed the same retained-memory gate. Record an actual
+OS memory-warning/trim callback if one occurs, but do not manufacture one or
+make nondeterministic callback delivery a separate pass condition.
 
 ## Packaging reproducibility
 
@@ -757,6 +826,18 @@ such as `rustup target add <target>`. Missing Android tooling must identify the
 pinned NDK/API/tool version. If `cargo-ndk` is selected, its required version is
 pinned in documentation and checked rather than installed. Direct NDK linker
 configuration remains acceptable if it is simpler and equally reproducible.
+
+### Reproducibility meaning
+
+Reproducible means two clean builds from the same source and toolchain on one
+machine into fresh output directories. Both must pass and report the same
+target/profile/features/exported symbols/native dependencies. Every raw static
+archive, JNI shared object, public header, and file inside the XCFramework must
+have an identical SHA-256 across the two builds. Normalized manifests must also
+match after removing only measured build duration. Build scripts must use path
+remapping and deterministic archive settings where required; timestamps,
+absolute paths, differing binary hashes, or any other unexplained field are NOT
+PASSED rather than documentation-waivable variance.
 
 ### Future CI
 
@@ -811,7 +892,8 @@ surprising result becomes Phase 2/5 evidence.
 
 - Use app-private application-support/no-backup directories.
 - Native hosts create and validate the allowed parent directory.
-- Probe input rejects path traversal/out-of-root paths.
+- Probe input uses canonical `allowedRoot` plus a single-component relative
+  filename and rejects traversal, separators, absolute paths, and symlinks.
 - iOS host records backup exclusion and file protection.
 - Android host uses internal `noBackupFilesDir` and no external storage.
 - Proof reset deletes database, WAL, SHM, and result files owned by the host.
@@ -841,7 +923,7 @@ The current in-progress logger is no-op on iOS/Android. Phase 1 must not broaden
 macOS `oslog`, add mobile logging dependencies, or make runtime success depend
 on core logs. Native proof harnesses record sanitized outcomes. If concurrent
 diagnostic work changes this before implementation, the security review must be
-rerun against the settled source.
+rerun against the chosen integration revision.
 
 ## What not to test yet
 
@@ -1027,7 +1109,9 @@ manifest tooling.
 **Platform:** Android.
 
 **Acceptance test:** All three ABI artifacts build/link; symbols, ELF ABI, and
-shared dependencies verify; current OpenSSL/TLS linkage outcome is documented.
+shared dependencies verify; the pinned verifier AAR is packaged; JNI
+initialization succeeds; and no OpenSSL native dependency or private CA bundle
+is present.
 
 **Model:** GPT-5.6 Terra implementation/review; Kimi K2.7 Code may implement
 manifest verification after toolchain details are fixed.
@@ -1059,8 +1143,10 @@ platform test scripts, result matrix.
 **Platform:** Both.
 
 **Acceptance test:** Required simulator/emulator and physical-device cases meet
-the TLS gate; Android OpenSSL packaging/trust has a binary viable/not-viable
-finding.
+the TLS gate; Apple Security linkage and Android Trust Manager initialization,
+AAR/R8 packaging, class loading, and trust have binary viable/not-viable
+findings. Existing FluxBar HTTP/parity tests and one macOS public-root HTTPS
+smoke also pass because the verifier configures the shared production agent.
 
 **Model:** GPT-5.6 Terra implementation; GPT-5.6 Sol reviews any TLS replacement
 decision, but does not preemptively implement one.
@@ -1109,7 +1195,11 @@ register updates. Remove no proof infrastructure yet.
 **Platform:** Both.
 
 **Acceptance test:** Every mandatory artifact/test/result is linked; exceptions
-are either explicitly non-gating above or produce NOT PASSED.
+are either explicitly non-gating above or produce NOT PASSED. A reviewer who was
+not the primary implementer or evidence-report author signs the decision and
+confirms that every Phase-1-scope `CRITICAL` finding is closed; known critical
+risks explicitly assigned to later phases do not invalidate claims Phase 1 does
+not make.
 
 **Model:** GPT-5.6 Sol performs the final risk review; GPT-5.6 Terra prepares the
 evidence index.
@@ -1151,9 +1241,11 @@ MOBILE RUNTIME PROOF NOT PASSED
 
 #### Baseline and isolation
 
-- Current FluxBar Rust tests and relevant ABI/parity tests pass from the settled
-  Phase 0 branch.
-- Normal FluxBar build/release behavior and symbols are unchanged.
+- Current FluxBar Rust tests and relevant ABI/parity tests pass from the chosen
+  clean integration revision.
+- Normal FluxBar build/release symbols are unchanged; the explicitly selected
+  shared platform verifier passes existing HTTP/parity tests and a macOS
+  public-root HTTPS smoke without changing request semantics.
 - Default artifacts reject/omit the probe operation.
 - Proof hosts contain no real credentials or product state.
 
@@ -1185,6 +1277,7 @@ MOBILE RUNTIME PROOF NOT PASSED
 - WAL/configuration facts are recorded.
 - Write/read, close/reopen, background/foreground, force terminate/relaunch,
   and persisted read all succeed.
+- Ten in-process probe reopen cycles and three full relaunch/read cycles pass.
 - Native code never opens the Rust-owned database.
 
 #### HTTPS/TLS
@@ -1194,7 +1287,8 @@ MOBILE RUNTIME PROOF NOT PASSED
 - Invalid certificate/hostname is rejected on both physical platforms.
 - DNS and timeout failures are bounded and controlled.
 - Certificate verification is never disabled.
-- Android OpenSSL/native-tls packaging and trust behavior is explicitly viable;
+- Android verifier initialization, pinned AAR/R8 packaging, class loading,
+  Trust Manager verification, and hostname checks are explicitly viable;
   otherwise the result is NOT PASSED pending a transport decision.
 
 #### Threading and lifecycle
@@ -1203,6 +1297,8 @@ MOBILE RUNTIME PROOF NOT PASSED
 - Blocking work succeeds from native background workers without UI-thread use.
 - Concurrent native calls and Rust-created thread probe pass without deadlock.
 - Mandatory physical foreground/background and process-relaunch checks pass.
+- Mandatory physical lock/background/unlock/read observations pass after first
+  unlock on both platforms.
 - Blocking-call cancellation limitations are measured and documented.
 
 #### Evidence and security
@@ -1213,7 +1309,11 @@ MOBILE RUNTIME PROOF NOT PASSED
   permissions/entitlements/exports, valid TLS, bounded probes.
 - Residual cross-process, cancellation, x86_64-iOS, armeabi-v7a-hardware, and
   product-level risks are explicitly handed to their later phases.
-- Independent Phase 1 review finds no unresolved critical mobile-runtime risk.
+- An independent reviewer signs the evidence index; no `CRITICAL` finding
+  within Phase 1's stated claims remains unresolved. Any mandatory exception or
+  unexplained evidence gap is NOT PASSED. Critical risks explicitly outside the
+  claims, including cross-process database coordination, remain recorded with a
+  later owner phase.
 
 ### NOT PASSED conditions
 
@@ -1233,12 +1333,15 @@ schema, or a replacement HTTP stack.
 These questions must be resolved by evidence or a narrowly scoped pre-merge
 decision during Phase 1:
 
-- exact Apple framework link set selected by `native-tls` on iOS;
-- whether Android OpenSSL can use an acceptable root store without insecure or
-  high-maintenance packaging;
+- exact final Apple Security/CoreFoundation link set selected by the platform
+  verifier on iOS;
+- whether Android Trust Manager honors the required system/user-CA and Network
+  Security Config semantics in the proof host;
+- whether to remove ureq's redundant `native-certs` feature after measuring its
+  discarded default-configuration startup behavior;
 - direct NDK linker setup versus a pinned external `cargo-ndk` tool;
 - exact mobile proof Cargo feature name and isolated module location;
-- stable tolerance for memory/build-time measurements across machines;
+- cross-machine variability of non-gating build-time measurements;
 - availability of 32-bit ARM hardware for a non-gating runtime confirmation;
 - availability of Intel iOS CI/host for the optional simulator slice; and
 - controlled HTTPS endpoint ownership and certificate-failure fixtures.

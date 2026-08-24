@@ -209,18 +209,21 @@ background scheduler, Keychain/Keystore wrapper, or FluxNews feature.
 **Acceptance criteria:**
 
 - device and simulator/emulator artifacts build for supported targets;
-- hosts provide database/cache paths without macOS path discovery;
+- hosts provide database paths without macOS path discovery; file-cache path
+  injection is explicitly not applicable because the current Rust icon cache is
+  memory-only and filesystem image caches remain native platform work;
 - repeated request/response/free cycles prove allocator ownership;
 - panic and malformed-input behavior remains contained;
 - native TLS trust, authentication, timeout, and proxy/custom-certificate
   assumptions are recorded;
-- load, foreground/background, termination, and reinitialization behavior is
-  characterized; and
+- load, foreground/background, termination, probe connection close/reopen, and
+  process relaunch behavior is characterized; and
 - cancellation limitations of blocking calls are measured rather than hidden.
 
 **Compatibility tests:** Existing ABI corpus on macOS plus mobile ABI smoke
-vectors, C-string ownership tests, repeated initialization, and FluxBar parity
-tests for any shared runtime change.
+vectors, C-string ownership tests, repeated probe open/close and host process
+relaunch, and FluxBar parity tests for any shared runtime change. Dynamic unload
+of a statically linked core is not a Phase 1 claim.
 
 **FluxBar behavior change:** No.
 
@@ -228,7 +231,9 @@ tests for any shared runtime change.
 
 **Physical-device validation:** Required on at least one supported iPhone and
 one supported Android device. Simulators/emulators alone do not prove TLS,
-memory pressure, process lifecycle, or locked/background behavior.
+realistic memory behavior under stress, process lifecycle, or locked/background
+observations. Deterministic OS memory-warning delivery is not itself required;
+the executable gate is defined in `MOBILE_RUNTIME_PROOF_CONTRACT.md`.
 
 **Recommended model:** GPT-5.6 Terra. Escalate ABI ownership or lifecycle
 ambiguity to GPT-5.6 Sol.

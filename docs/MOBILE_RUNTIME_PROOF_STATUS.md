@@ -1,9 +1,10 @@
-# Mobile Runtime Proof — Phase 1A Status
+# Mobile Runtime Proof — Phase 1A/1B Status
 
 This document records the result of **Phase 1A: Reproducible target and dependency
-preflight** from `docs/MOBILE_RUNTIME_PROOF_CONTRACT.md`. It is an evidence
-report, not a product decision. No native FluxNews application, mobile schema,
-binding technology, or production API has been created.
+preflight** and **Phase 1B: iOS runtime host proof** from
+`docs/MOBILE_RUNTIME_PROOF_CONTRACT.md`. It is an evidence report, not a product
+decision. No native FluxNews application, mobile schema, binding technology, or
+production API has been created.
 
 ## Scope of this document
 
@@ -17,8 +18,16 @@ Phase 1A answers:
 6. What minimal build scripts should exist for later Phase 1B/1C host integration.
 7. Which remaining blockers must be resolved before the runtime proof can continue.
 
-Runtime behavior (TLS trust stores, SQLite lifecycle, threading, physical devices,
-etc.) is intentionally deferred to later sub-phases.
+Phase 1B answers:
+
+1. Whether the existing C/JSON ABI works on iOS.
+2. Whether the Rust core can be packaged as an iOS XCFramework.
+3. Whether the core's SQLite, threading, panic boundary, and HTTPS/TLS behavior
+   function on the iOS simulator.
+4. Whether the iOS trust-store blocker identified in Phase 1A can be reproduced
+   and safely fixed.
+
+Physical-device lifecycle validation remains intentionally deferred to Phase 1I.
 
 ---
 
@@ -200,14 +209,15 @@ Direct and relevant transitive dependencies were classified for Phase 1A
 | `ring` | REQUIRES_CONFIGURATION | REQUIRES_CONFIGURATION | REQUIRES_CONFIGURATION | Cross-compiles for all targets; uses NDK clang on Android. |
 | Complete transitive graph | Unknown until runtime | Unknown until runtime | UNKNOWN_NEEDS_RUNTIME_TEST | Cargo metadata alone does not prove mobile linking. All required archives linked, but TLS, SQLite, and thread behavior need host execution. |
 
-### Important discrepancy
+### Resolved contract discrepancy
 
-`docs/MOBILE_RUNTIME_PROOF_CONTRACT.md` discusses `native-tls` on iOS/Android.
-The actual `rust-core/Cargo.toml` uses `ureq` with `features = ["tls", "native-certs"]`
-and `default-features = false`, which selects **rustls + rustls-native-certs**,
-not `native-tls`. This was confirmed by inspecting `Cargo.lock` and the `ureq`
-source (`src/rtls.rs`). The contract's TLS runtime questions remain valid, but
-the underlying crate is rustls-native-certs, not native-tls.
+The initial Phase 1A audit found that the contract described `native-tls` while
+the implementation selected rustls. Phase 1B subsequently configured the shared
+agent with `rustls-platform-verifier`, and
+`docs/MOBILE_RUNTIME_PROOF_CONTRACT.md` now audits that exact stack. The
+remaining `native-certs` feature constructs ureq's discarded default TLS
+configuration before the explicit verifier is installed; its startup effect or
+removal remains a Phase 1 evidence item, not the active handshake verifier.
 
 ---
 
@@ -273,57 +283,170 @@ semantics are preserved unchanged in mobile artifacts.
 
 ---
 
+## Phase 1B — iOS runtime host proof
+
+### What was implemented
+
+1. **`mobile-runtime-proof` Cargo feature** in `rust-core/Cargo.toml`.
+   - Adds a feature-gated `mobile_runtime_probe` operation to the existing
+     C/JSON ABI without changing the production FluxBar operations.
+   - Probe actions: `runtime_info`, `round_trip`, `sqlite_open`, `sqlite_write`,
+     `sqlite_read`, `sqlite_close`, `https_get`, `thread_probe`, `panic`.
+   - The probe uses its own minimal SQLite schema and never touches the FluxBar
+     production schema.
+
+2. **iOS TLS trust-store fix** (`rust-core/src/remote/miniflux.rs`).
+   - Replaced `rustls-native-certs` with `rustls-platform-verifier` 0.6 for the
+     shared ureq HTTP agent.
+   - On iOS/macOS this uses `Security.framework`; on Android it will use the
+     system Trust Manager once the JVM component is initialized; on Linux it
+     falls back to `rustls-native-certs`.
+   - This is the smallest change that keeps the existing ureq-based HTTP client
+     while moving trust semantics to the platform verifier.
+
+3. **iOS build/packaging scripts**.
+   - `Build/build-rust-ios.sh` now accepts `CARGO_FEATURES` for feature-gated
+     proof builds.
+   - `Build/package-rust-ios-proof.sh` creates `FluxCore.xcframework` with a
+     proper `Headers/` directory and a hand-written `module.modulemap` so Swift
+     can import the C ABI.
+
+4. **Minimal iOS proof host** under `mobile-proof/ios/`.
+   - `project.yml` drives XcodeGen for reproducible project generation.
+   - `FluxBarMobileProof` app target with a simple SwiftUI status view.
+   - `FluxBarMobileProofTests` XCTest target covering:
+     - FFI invocation and error boundaries (`runtime_info`, malformed JSON,
+       unknown operation);
+     - JSON round-trip and concurrent round-trip with no response crossover;
+     - SQLite open/write/read/close/reopen persistence and path containment;
+     - HTTPS public-root success and invalid-certificate failure;
+     - Thread spawn/join coordination;
+     - Intentional contained panic and process usability afterward.
+
+### iOS simulator test results
+
+All 12 XCTests pass on an iOS 26.5 arm64 simulator:
+
+```sh
+cd mobile-proof/ios
+xcodegen generate
+xcodebuild -project FluxBarMobileProof.xcodeproj -scheme FluxBarMobileProof \
+  -destination 'platform=iOS Simulator,name=iPhone 11 Pro Max,OS=26.5' \
+  -configuration Debug test CODE_SIGNING_ALLOWED=NO
+```
+
+Result: `Executed 12 tests, with 0 failures`.
+
+Key observations:
+
+- `runtime_info` reports `os: ios`, `arch: arm64`, `panicStrategy: unwind`, and
+  `mobileRuntimeProofEnabled: true`.
+- `https_get` against `https://httpbin.org/get` returns HTTP 200.
+- `https_get` against `https://self-signed.badssl.com/` fails with a transport
+  error, proving certificate validation is active and cannot be bypassed.
+- The intentional `panic` probe prints a Rust backtrace to the device log but
+  returns the deterministic `{"ok":false,"error":"internal error"}` JSON and
+  the core remains usable for the next call.
+
+### iOS TLS blocker resolution
+
+The Phase 1A concern that `rustls-native-certs` does not use
+Security.framework on iOS is **resolved** for the shared HTTP agent by adopting
+`rustls-platform-verifier`. The iOS simulator test suite now passes real
+public-root HTTPS requests and rejects invalid certificates, so the blocker is
+no longer a Phase 1B/1G risk.
+
+Android trust-store behavior remains unverified and is still a Phase 1E/1G
+concern.
+
+### Phase 1B artifact layout
+
+```text
+.build/mobile/ios-proof/
+    device-arm64/libfluxcore.a
+    simulator-arm64/libfluxcore.a
+    Headers/libfluxcore.h
+    Headers/module.modulemap
+    manifest.json
+    FluxCore.xcframework
+
+mobile-proof/ios/
+    project.yml
+    FluxBarMobileProof/
+        FluxBarMobileProofApp.swift
+        ContentView.swift
+        FluxCore.swift
+        Info.plist
+    FluxBarMobileProofTests/
+        FluxBarMobileProofTests.swift
+    FluxBarMobileProof.xcodeproj   # generated by XcodeGen, gitignored
+```
+
+The `.build/mobile/` tree is gitignored. The Xcode project is generated from
+`project.yml` with XcodeGen. The generated `.xcodeproj` is gitignored; run
+`xcodegen generate` in `mobile-proof/ios` after checkout to open it in Xcode.
+
+---
+
 ## Known blockers and deferred questions
 
 ### Phase 1A blockers (must be resolved before 1B)
 
 None. All required targets build and the build scripts are functional.
 
+### Phase 1B blockers (must be resolved before 1C/1D acceptance)
+
+None for the iOS simulator scope. Physical-device validation is deferred to
+Phase 1I and is recorded as a residual risk, not a blocker.
+
 ### Phase 1G blockers (runtime TLS)
 
-- **iOS trust store:** `rustls-native-certs` 0.7.3 does not use Security.framework
-  on iOS. The Unix backend reads filesystem paths that are not present on iOS.
-  Valid HTTPS against public roots will likely fail unless the stack is
-  reconfigured (e.g., `rustls-platform-verifier`, direct Security.framework
-  integration, or an explicit embedded root bundle). This is a Phase 1G
-  decision, not a Phase 1A change.
-- **Android trust store:** `rustls-native-certs` uses `openssl-probe` to read
-  `/system/etc/security/cacerts`. This should work on standard Android devices,
-  but must be verified on emulator and physical device in Phase 1G.
+- **iOS trust store:** RESOLVED for the shared HTTP agent by
+  `rustls-platform-verifier`. The iOS simulator passes public-root HTTPS and
+  invalid-certificate rejection tests.
+- **Android trust store:** `rustls-platform-verifier` requires JVM
+  initialization (`rustls_platform_verifier::android::init_with_env`) and a
+  Kotlin/Gradle component. This must be wired in Phase 1E and verified on
+  emulator/physical device in Phase 1G. Until then, Android TLS remains a
+  residual risk.
 
 ### Intentionally deferred to later phases
 
-- Feature-gated `mobile-runtime-proof` probe operation (Phase 1B).
-- iOS XCFramework packaging (Phase 1C).
-- Minimal iOS proof host and XCTest (Phase 1D).
 - Android JNI shim and `.so` packaging (Phase 1E).
 - Minimal Android proof host and instrumentation (Phase 1F).
-- Controlled HTTPS trust matrix (Phase 1G).
-- Concurrency, panic, and ownership stress tests (Phase 1H).
+- Controlled HTTPS trust matrix on Android and physical iOS (Phase 1G).
+- Concurrency, panic, and ownership stress tests beyond the baseline coverage
+  added here (Phase 1H).
 - Physical-device lifecycle validation (Phase 1I).
 - Final PASS/NOT PASSED decision (Phase 1J).
 - Binding decision (C/JSON, typed C, UniFFI) — Phase 5.
 - Mobile schema and persistence API — Phase 2/3.
-- Mobile logging backend decisions — after Phase 1A.
+- Mobile logging backend decisions — after Phase 1B.
 
 ---
 
-## Artifact layout
+## Phase 1A artifact layout
 
 ```text
 .build/mobile/
     ios/
         device-arm64/libfluxcore.a
         simulator-arm64/libfluxcore.a
-        libfluxcore.h
+        Headers/libfluxcore.h
+        Headers/module.modulemap
         manifest.json
     android/
         arm64-v8a/libfluxcore.a
         x86_64/libfluxcore.a
         armeabi-v7a/libfluxcore.a
-        libfluxcore.h
+        Headers/libfluxcore.h
+        Headers/module.modulemap
         manifest.json
 ```
+
+The header directory now includes a `module.modulemap` for Swift import. The
+iOS proof build additionally produces `FluxCore.xcframework` under
+`.build/mobile/ios-proof/` (see Phase 1B section above).
 
 This layout is separate from the macOS FluxBar release directories (`dist/`,
 `.build/DerivedData/`). It is gitignored via the existing `/.build/` rule.
@@ -337,7 +460,9 @@ All commands succeeded:
 ```sh
 cargo fmt --manifest-path rust-core/Cargo.toml --check
 cargo check --manifest-path rust-core/Cargo.toml
+cargo check --manifest-path rust-core/Cargo.toml --features mobile-runtime-proof
 cargo test --manifest-path rust-core/Cargo.toml
+cargo test --manifest-path rust-core/Cargo.toml --features mobile-runtime-proof
 cd go-core && go test ./... && go vet ./...
 ./Build/test-core-parity.sh
 ./Build/build.sh
@@ -346,14 +471,28 @@ FLUX_CORE=go ./Build/build.sh
 git diff --check
 ```
 
+iOS proof host validation:
+
+```sh
+CARGO_FEATURES=mobile-runtime-proof Build/build-rust-ios.sh .build/mobile/ios-proof release
+Build/package-rust-ios-proof.sh .build/mobile/ios-proof .build/mobile/ios-proof/FluxCore.xcframework
+cd mobile-proof/ios
+xcodegen generate
+xcodebuild -project FluxBarMobileProof.xcodeproj -scheme FluxBarMobileProof \
+  -destination 'platform=iOS Simulator,name=iPhone 11 Pro Max,OS=26.5' \
+  -configuration Debug test CODE_SIGNING_ALLOWED=NO
+```
+
+Result: `Executed 12 tests, with 0 failures`.
+
 No existing tests were weakened.
 
 ---
 
 ## Next step
 
-**PHASE 1B — iOS runtime host proof** is the recommended next step if Phase 1A
-is accepted. If the iOS TLS trust-store finding is considered blocking before
-any runtime work, then the immediate next step is **PHASE 1G BLOCKER
-REMEDIATION** (evaluate rustls-platform-verifier, Security.framework integration,
-or an explicit root bundle for iOS).
+**PHASE 1E — Android JNI shim and `.so` packaging** is the recommended next step,
+with the understanding that Android TLS will require
+`rustls-platform-verifier` JVM initialization before Phase 1G can pass. If the
+iOS physical-device validation is considered blocking earlier, **PHASE 1I** may
+be interleaved after Android build artifacts are proven.

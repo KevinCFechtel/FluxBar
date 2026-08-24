@@ -1,0 +1,39 @@
+name: FluxBarMobileProof
+targets:
+  FluxBarMobileProof:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - FluxBarMobileProof
+    settings:
+      base:
+        INFOPLIST_FILE: FluxBarMobileProof/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        PRODUCT_BUNDLE_IDENTIFIER: dev.fluxbar.mobile.proof
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - framework: ../../.build/mobile/ios-proof/FluxCore.xcframework
+        embed: false
+        link: true
+  FluxBarMobileProofTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - FluxBarMobileProofTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.fluxbar.mobile.proof.tests
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - target: FluxBarMobileProof
+      - framework: ../../.build/mobile/ios-proof/FluxCore.xcframework
+        embed: false
+        link: true

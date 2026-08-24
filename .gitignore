@@ -46,3 +46,7 @@ go.work.sum
 *.p12
 *.pem
 *.key
+
+# Generated Xcode project for the mobile proof host (source of truth is project.yml)
+mobile-proof/ios/FluxBarMobileProof.xcodeproj/
+mobile-proof/ios/**/xcuserdata/

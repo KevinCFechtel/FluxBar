@@ -6,6 +6,8 @@
 
 use std::time::Instant;
 
+#[cfg(feature = "mobile-runtime-proof")]
+use crate::probe::ProbeParams;
 use crate::runtime::AppRuntime;
 use crate::transport::{Operation, Response};
 
@@ -118,6 +120,32 @@ pub fn dispatch(operation: Operation, runtime: &AppRuntime) -> Response {
             other_fallback,
             count,
         } => handlers::localize_plural(&locales, &key, &one_fallback, &other_fallback, count),
+        #[cfg(feature = "mobile-runtime-proof")]
+        Operation::MobileRuntimeProbe {
+            action,
+            payload,
+            size,
+            allowed_root,
+            db_filename,
+            key,
+            value,
+            url,
+            timeout_ms,
+            iterations,
+            confirm_panic,
+        } => crate::probe::dispatch(ProbeParams {
+            action,
+            payload,
+            size,
+            allowed_root,
+            db_filename,
+            key,
+            value,
+            url,
+            timeout_ms,
+            iterations,
+            confirm_panic,
+        }),
     };
 
     let elapsed = start.elapsed().as_millis();
@@ -157,6 +185,8 @@ fn operation_name(operation: &Operation) -> &'static str {
         Operation::FeedIcon { .. } => "feed_icon",
         Operation::Localize { .. } => "localize",
         Operation::LocalizePlural { .. } => "localize_plural",
+        #[cfg(feature = "mobile-runtime-proof")]
+        Operation::MobileRuntimeProbe { .. } => "mobile_runtime_probe",
     }
 }
 
