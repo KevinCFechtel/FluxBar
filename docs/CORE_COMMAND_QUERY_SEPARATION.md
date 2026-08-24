@@ -1,6 +1,6 @@
 # Core Command--Query Separation
 
-**Status:** Proposed architecture decision\
+**Status:** Adopted architecture invariant; implementation deferred\
 **Scope:** FluxBar Rust core and future shared/mobile core API\
 **Origin:** UI behavior observed during FluxBar timeline testing\
 **Implementation:** Deferred until current Phase 1 runtime work is
@@ -206,23 +206,17 @@ They should not implicitly perform unrelated state queries.
 
 ## `refresh`
 
-`refresh` belongs to synchronization rather than simple command/query
-state access.
+`refresh` belongs to synchronization rather than simple command/query state
+access. Future mobile synchronization should return synchronization-specific
+completion, change, freshness, or retry metadata; current repository state is
+obtained through an explicit query. A legacy compatibility operation may still
+transport a snapshot, but the client must choose whether to adopt it and the
+future API must not make snapshot replacement an implicit consequence of
+synchronization.
 
-Its final response contract is intentionally not changed by this
-decision.
-
-A later API review should decide whether:
-
-1.  `refresh` synchronizes and returns a resulting snapshot; or
-2.  `refresh` synchronizes only, with the client subsequently calling
-    `get_snapshot()`.
-
-Either design can be valid.
-
-The important requirement established here is that **ordinary local
-mutations must not implicitly replace the caller's presentation
-snapshot**.
+The important requirements are that **ordinary local mutations must not
+implicitly replace the caller's presentation snapshot** and **synchronization
+must not force presentation adoption**.
 
 ## Persistent core state and presentation state
 
@@ -351,7 +345,7 @@ This decision does **not** currently:
 -   change Undo semantics;
 -   change database schema;
 -   remove Go;
--   prescribe the final `refresh` response contract;
+-   change the legacy FluxBar `refresh` response contract;
 -   implement the FluxBar UI fix.
 
 Those changes require their own implementation/review phases.
@@ -362,8 +356,13 @@ Record this decision now so that ongoing mobile runtime, schema,
 synchronization, and binding work does not accidentally treat
 mutation-to-snapshot coupling as a required architectural property.
 
-Actual implementation should wait until the currently running Phase 1
-runtime work is complete, unless a blocking issue requires otherwise.
+Actual implementation should wait until Phase 1 runtime closure. Phase 2 owns
+the durable command/query/synchronization and counter contracts; Phase 3
+implements the local repository and query side of the separation; Phase 4
+implements durable commands and sync-only outcomes plus explicit query/adoption. Any FluxBar
+response-contract change remains a separate desktop compatibility task and must
+complete before a Rust-backed public release if the active-timeline issue is
+still present.
 
 Before implementation:
 

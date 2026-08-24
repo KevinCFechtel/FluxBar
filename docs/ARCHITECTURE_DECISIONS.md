@@ -56,24 +56,25 @@ Future Windows/Linux support should reuse the product semantics and
 portable core, not force a pixel-identical UI or cross-platform toolkit
 onto macOS.
 
-### Application localization is UI-framework independent
+### Localization ownership follows the product boundary
 
-Shared application strings use `github.com/nicksnyder/go-i18n/v2`
-directly. Localization must not depend on Fyne or another UI framework.
+The FluxBar compatibility surface keeps shared application strings and current
+JSON catalog semantics behind the portable core; Rust and Go remain compatible
+while Go is retained. Localization must not depend on Fyne or another UI
+framework.
 
-JSON catalogs use the `go-i18n` resource format and live under
-`go-core/internal/localization/translations`. English is the default catalog and
-fallback locale. Native clients pass ordered BCP-47 locale preferences
-to the Go localization package and obtain localized strings through
-their native platform bridge. Platform-required metadata may use native
-resources, but native clients should not duplicate the complete
-application catalog.
+Future native FluxNews UI, widgets, automotive surfaces, and platform metadata
+use native Swift/Kotlin catalogs. Rust owns stable typed/domain error identity
+and non-presentational fallback text where required, not the complete native UI
+catalog. This avoids coupling independent native products to FluxBar's legacy
+`go-i18n` resource format.
 
-New strings must use stable, descriptive keys and provide an English
-caller fallback. Add each key to the English and supported locale
-catalogs in the same change. Existing `fmt` placeholders remain valid
-for parameterized messages; plural messages use `go-i18n` plural forms
-and named template data.
+New FluxBar compatibility/core-owned strings must use stable, descriptive keys
+and provide an English caller fallback. Add each key to the English and
+supported locale catalogs in the same change. Existing `fmt` placeholders
+remain valid for parameterized messages; plural messages use `go-i18n` plural
+forms and named template data. Native FluxNews UI strings follow their platform
+catalogs instead.
 
 ### macOS is Menu Bar first
 
@@ -84,12 +85,13 @@ A conventional full Dock window is not required for normal use.
 
 ### macOS uses a narrow native core bridge
 
-The native macOS target currently links the Go core as a C archive and
-exchanges serialized request/response payloads through a small C ABI.
+The native macOS target links the Rust core by default, with Go retained as an
+explicit fallback, and exchanges serialized request/response payloads through a
+small C ABI.
 Keep platform-independent Miniflux and browse semantics behind this
 boundary; do not grow a parallel Swift networking implementation.
 
-Browse snapshots are explicitly versioned so the native client and Go
+Browse snapshots are explicitly versioned so the native client and portable
 core can evolve their schema deliberately.
 
 ## Navigation and Layout

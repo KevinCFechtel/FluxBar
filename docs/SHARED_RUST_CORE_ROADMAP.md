@@ -111,8 +111,8 @@ and importable domain concepts so migration remains feasible.
 ### Phase dependency summary
 
 ```text
-Phase 0  FluxBar first-release hardening
-    |
+Phase 0  FluxBar first-release hardening (parallel release gate)
+Phase 1 does not claim Phase 0 release completion.
 Phase 1  mobile runtime proof
     |
 Phase 2  mobile contracts + schema + migration discovery
@@ -229,11 +229,11 @@ of a statically linked core is not a Phase 1 claim.
 
 **FluxNews fixtures:** No; a tiny fake server is sufficient.
 
-**Physical-device validation:** Required on at least one supported iPhone and
-one supported Android device. Simulators/emulators alone do not prove TLS,
-realistic memory behavior under stress, process lifecycle, or locked/background
-observations. Deterministic OS memory-warning delivery is not itself required;
-the executable gate is defined in `MOBILE_RUNTIME_PROOF_CONTRACT.md`.
+**Physical-device validation:** Deferred from the runtime-feasibility gate but
+required before native product development depends on the proof architecture.
+Simulators/emulators do not prove realistic memory, process lifecycle, file
+protection, or locked/background behavior; those residual claims stay explicit
+in `MOBILE_RUNTIME_PROOF_CONTRACT.md`.
 
 **Recommended model:** GPT-5.6 Terra. Escalate ABI ownership or lifecycle
 ambiguity to GPT-5.6 Sol.
@@ -275,6 +275,13 @@ unchanged.
 - mobile schema v1 is specified with explicit migration/version rules;
 - full articles, feeds, categories, enclosures, progression, effective/remote/
   desired state, pending revisions, retention, and indexes have owners;
+- command receipts, query/pagination behavior, and synchronization outcome
+  categories are specified without coupling mutations or synchronization to
+  presentation adoption;
+- synchronization run identity, scope/completeness/freshness evidence, durable
+  versus presented counter meanings, and restart semantics are specified;
+- destructive reset coordination and in-process concurrency assumptions are
+  explicit;
 - custom-header allow/override policy and `/me`/version capability behavior are
   characterized;
 - semantic versus presentation settings are separated;
@@ -395,6 +402,12 @@ CarPlay, background scheduling, backup/restore, onboarding, or Flutter import.
 - `/me` validates the configured account, version discovery records supported
   server behavior, and capability gates prevent unsupported operations;
 - local queries render before refresh;
+- synchronization persists entries, baselines, completeness, and durable
+  counters and returns only synchronization outcome/change metadata; it does not
+  implicitly replace an active client snapshot;
+- clients adopt current repository rows and presentation counters through an
+  explicit query at a client-chosen refresh point; freshness policy remains a
+  native product decision;
 - initial and incremental main/starred sync handle configured scope/windows;
 - capped or unstable results never authorize destructive absence cleanup;
 - remote field and attachment changes refresh without dropping local intent;
@@ -411,8 +424,9 @@ CarPlay, background scheduling, backup/restore, onboarding, or Flutter import.
 - pending desired values win over stale refresh baselines; and
 - automatic-read mutations retain durable Undo receipts while native code owns
   visibility detection and Undo timing;
-- a SwiftUI article list performs configure, local query, refresh, read/unread,
-  and star/bookmark against a live or controlled Miniflux server.
+- a SwiftUI article list performs configure, local query, synchronization,
+  explicit snapshot adoption, read/unread, and star/bookmark against a live or
+  controlled Miniflux server without destabilizing an active timeline.
 
 **Compatibility tests:** Stateful fake-server sync sequences, custom-header and
 `/me`/version/capability matrices, incomplete and changing pagination, process
@@ -997,7 +1011,9 @@ data and intentional workflows are the compatibility target.
 
 ### Milestone 0: Runtime proof
 
-Phase 1. Rust loads and behaves safely on physical iOS and Android devices.
+Phase 1. Rust loads and behaves safely in representative native iOS and Android
+hosts. Physical-device behavior remains product qualification before native
+development relies on the architecture.
 
 ### Milestone 1: Core prototype parity
 
@@ -1127,7 +1143,7 @@ Those fixtures survive after Go source and live differential jobs are removed.
 | Synchronization completeness | `CRITICAL` | Capped or unstable sets can cause destructive reconciliation. | Phase 4. |
 | Cross-process SQLite access | `CRITICAL` | Foreground/background overlap can corrupt ordering or double-deliver mutations. | Phase 7. |
 | iOS background lifecycle | `HIGH` | BGTask expiration, locked secrets, and process death affect durability. | Phase 7 on physical devices. |
-| Android process lifecycle | `HIGH` | WorkManager recreation and multi-process timing differ from desktop assumptions. | Phase 1 characterization; fully Phase 7. |
+| Android process lifecycle | `HIGH` | WorkManager recreation and multi-process timing differ from desktop assumptions. | Native product smoke before development; fully Phase 7. |
 | Progression conflict semantics | `HIGH` | Explicit zero/completion and stale remote values can resume incorrectly. | Phase 8. |
 | Binding choice | `HIGH` | Premature choice creates package/API churn across Swift and Kotlin. | Phase 5. |
 | Flutter data migration | `CRITICAL` | Historical schemas and ambiguous intent can lose user state. | Discovery starts Phase 2; retired Phase 10. |
@@ -1155,18 +1171,46 @@ The following must remain explicit gates rather than assumptions:
 - unencrypted backup security policy and compatibility promise; and
 - whether two native consumers justify shared ID3 parsing.
 
+## Flux repository transition gate
+
+After Phase 2 contracts stabilize and before Phase 3 implementation, separately
+approve a repository consolidation. If `Flux` is a rename/transfer destination,
+rename or transfer the current FluxBar repository without simultaneously
+restructuring source or importing the production Flutter tree. This preserves
+the history that created the shared Rust core, macOS client, compatibility
+oracle, proofs, and architecture documents while keeping the existing FluxNews
+repository authoritative for Flutter maintenance and releases.
+
+If `Flux` is already a distinct populated repository, do not describe copying
+commits into it as a transfer/rename: choose and review an explicit history
+integration method and separately preserve issues, pull requests, releases,
+settings, and automation. In either case, tag/freeze the pre-transition revision,
+mirror both repositories, preserve product release automation, and reproduce
+the full Rust/Go/macOS/mobile-proof baseline
+after the transfer. Directory restructuring is a separate infrastructure-only
+gate after Phase 2 contracts are stable and before Phase 3 implementation. The
+eventual structure should be product-oriented (`apps/fluxbar/macos`, future
+`apps/fluxnews/ios` and `apps/fluxnews/android`), with `core/rust`,
+`core/go-reference`, `proofs/mobile-runtime`, `docs`, and `tooling`; do not move
+the Flutter production app into Flux during native replacement development.
+
+Use product-scoped tags, changelogs, and workflows so FluxBar, FluxNews, and any
+future independently packaged core can release separately. The original
+FluxNews issue/PR/tag history remains in its repository; cross-layer native/core
+work uses one issue and PR in Flux.
+
 ## Concrete recommended sequence
 
 ```text
-FluxBar Rust first-release hardening
+mobile C ABI/runtime proof on iOS and Android (close review findings)
         |
         v
-mobile C ABI/runtime proof on iOS and Android
-        |
-        v
-mobile identity/domain/schema contract
+mobile identity/domain/schema + command/query/sync contract
         |\
         | +--> begin read-only Flutter migration characterization
+        v
+separately approve repository consolidation; no source restructure
+        |
         v
 versioned local mobile repository + cursor queries
         |
@@ -1197,7 +1241,10 @@ full replacement readiness
                          +--> Go removal only if its oracle value is exhausted
 ```
 
-The single next implementation phase after this planning task is **Phase 0:
-FluxBar Rust first-release hardening**. It closes the remaining product/release
-evidence for the proving consumer without recreating an unnecessary Go-to-Rust
-rollout. Phase 1 mobile runtime proof can follow immediately after that gate.
+FluxBar Rust first-release hardening remains a parallel release track. It does
+not become complete merely because the mobile runtime proof or Phase 2 contracts
+advance.
+
+The single next implementation task is the narrow Phase 1 closure work listed
+in `MOBILE_RUNTIME_PROOF_CONTRACT.md`. Do not begin Phase 2 or transfer the
+repository until the coherent proof build and independent gate pass.

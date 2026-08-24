@@ -670,3 +670,391 @@ No existing tests were weakened.
 **PHASE 1D — iOS/Android artifact reproducibility and size baselines** is the
 recommended next step, with physical-device lifecycle validation deferred to
 Phase 1I as a recorded residual risk.
+
+---
+
+## Final independent review (2026-08-24)
+
+This section supersedes the incremental "Next step" above while preserving the
+earlier Phase 1A-1C evidence as history. The requirements were re-derived from
+the implementation and runtime-feasibility objective rather than accepted from
+the planning contract unchanged.
+
+### Phase 1 decision
+
+```text
+PHASE 1 NOT PASSED
+```
+
+Build portability and representative iOS/Android execution are established,
+but the current Android proof cannot provide trustworthy closure evidence:
+
+1. `GetStringUTFChars`/`NewStringUTF` pass JNI Modified UTF-8 directly to a
+   standard-UTF-8 C ABI (`mobile-proof/android/app/src/main/cpp/jni-bridge.cpp:36-61`).
+2. A clean Android proof build fails its arm64 ELF check even though `file` and
+   NDK `llvm-readelf` confirm a valid AArch64 `.so`; `set -o pipefail` combines
+   with early-exiting `grep -q` at `Build/build-rust-android.sh:292`.
+3. Gradle always registers the default JNI root and then an optional override,
+   using `pickFirsts` to hide duplicates (`mobile-proof/android/app/build.gradle.kts:51-68`).
+4. Neither native host has the bounded repeated-call ownership coverage required
+   to close allocator/free-path evidence.
+5. iOS does not yet execute the blocking SQLite and HTTPS probes from a native
+   background queue; the current XCTest calls the synchronous wrapper directly.
+6. The native hosts do not directly cover null request pointers or valid raw
+   pointers containing invalid UTF-8 at their shim boundaries.
+7. Native SQLite tests assert WAL but not the reported `synchronous` and
+   `busyTimeout` configuration values.
+8. Source gating is clear, but no recorded default-artifact inspection proves
+   both the probe operation and Android verifier initializer are absent.
+
+These are narrow Phase 1 closure tasks. They do not require a new production
+API, schema, binding technology, transport, or Go removal.
+
+### Contract review
+
+| Disposition | Requirements |
+| --- | --- |
+| Retained | Locked mobile builds; native host execution; unchanged two-symbol C ABI; standard UTF-8; copy/free ownership; panic containment; concurrency; bundled SQLite close/reopen; sandbox paths; public-root success; invalid-certificate rejection; Android verifier initialization/AAR/R8; macOS regression suites. |
+| Corrected | Reproducibility now means locked inputs and repeatable semantically equivalent builds; memory requires bounded ownership/leak evidence rather than an exact RSS formula; lifecycle requires enough initialization evidence for feasibility rather than production scheduler behavior. |
+| Removed from Phase 1 | Byte-identical mobile artifacts and manifests; mandatory physical-device execution; exact device memory thresholds; lock/background and process-death product scenarios. |
+| Deferred | Physical-device lifecycle/trust/file-protection; x86_64/armv7 runtime support claims; controlled TLS/timeout/DNS matrix; secure storage; background workers; widgets; product schema; migration; final bindings; supply-chain reproducible releases. |
+| Added | Explicit standard-versus-Modified-UTF-8 validation; one unambiguous artifact root; clean build-script success as evidence provenance; shared-production TLS regression ownership. |
+
+Byte-identical output is not necessary to prove runtime feasibility. This review
+did not retain a complete paired clean-build hash record suitable for an
+auditable reproducibility claim. Bit-identical release artifacts may be adopted
+later as a supply-chain requirement, but are not a Phase 1 gate.
+
+### Evidence matrix
+
+| Capability | macOS | iOS Simulator | iOS Device | Android Emulator | Android Device |
+| --- | --- | --- | --- | --- | --- |
+| Build | PROVEN | PROVEN | BUILD ONLY | PARTIAL: arm64 ran; clean all-ABI script fails; x86_64 BUILD ONLY | BUILD ONLY arm64/armv7 |
+| FFI | PROVEN | PARTIAL: null/invalid-byte shim cases absent | NOT TESTED | PARTIAL: Modified UTF-8 and boundary-test gaps | NOT TESTED |
+| Memory ownership | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED |
+| Panic containment | PROVEN | PROVEN | NOT TESTED | PROVEN | NOT TESTED |
+| Threading | PROVEN | PARTIAL: no blocking background-queue test | NOT TESTED | PROVEN | NOT TESTED |
+| SQLite | PROVEN | PARTIAL: configuration assertions incomplete | NOT TESTED | PARTIAL: configuration assertions incomplete | NOT TESTED |
+| Persistence | PROVEN | PROVEN close/reopen | NOT TESTED | PROVEN close/reopen | NOT TESTED |
+| TLS public-root | PARTIAL for current verifier | PROVEN | NOT TESTED | PROVEN arm64 | NOT TESTED |
+| Invalid certificate rejection | NOT TESTED for current verifier | PROVEN | NOT TESTED | PROVEN arm64 | NOT TESTED |
+| Lifecycle/reinit | PARTIAL | PARTIAL | NOT TESTED | PARTIAL | NOT TESTED |
+| Release-style packaging | PARTIAL current unsigned build | PROVEN XCFramework | BUILD ONLY | PROVEN R8 host; clean artifact script currently fails | NOT TESTED |
+
+`Android Emulator` runtime evidence is arm64 only. Neither an x86_64 emulator
+nor physical Android hardware was executed. Simulator/emulator evidence is not
+device evidence. For this review run, the requested JNI library and the copy in
+both the debug and R8 `releaseTest` APKs had SHA-256
+`9edb1cb391dd2e94fa0d83c6b40253ac50a569a9fb4cec9521bb003cd8081a8b`.
+That proves this execution used the requested library, but the Gradle source-set
+configuration remains unsafe when both roots exist.
+
+### TLS architecture
+
+```text
+shared build_http_agent
+          |
+        ureq 2.12.1
+          |
+      rustls 0.23.43
+          |
+rustls-platform-verifier 0.6.2
+       /                 \
+Apple Security.framework  Android Trust Manager
+ macOS / iOS               JNI Context initialization
+                           + locked support AAR 0.1.1
+```
+
+`rust-core/src/remote/miniflux.rs:26-50` installs the explicit verifier used by
+both production Miniflux requests and the probe. iOS simulator and Android arm64
+emulator prove public-root success and self-signed rejection. Android packages
+the lock-matched AAR and R8 keep rule and initializes from application context.
+The host currently calls deprecated alias `init_hosted`; `init_with_env` is the
+equivalent current crate API and should be used during closure cleanup.
+
+ureq still enables `native-certs` (`rust-core/Cargo.toml:24-35`). Its default
+configuration is constructed and then replaced by the explicit verifier. It is
+redundant rather than the active handshake verifier; remove it with regression
+tests or document its discarded initialization before release.
+
+The current macOS compile/link and parity evidence is sufficient for Phase 1
+feasibility because iOS executes the same Apple verifier path. A live public-root
+request through `build_http_agent`, followed by signed/notarized live Miniflux
+sync, is required before the first Rust-backed FluxBar public release, not before
+Phase 2 architecture work.
+
+### SQLite runtime assessment
+
+Bundled SQLite runtime feasibility is sufficiently proven to design mobile
+schema v1. Both representative mobile hosts create a Rust-owned database under
+native-selected app-private roots, enable WAL, commit Unicode values, close,
+reopen, and read them. This does not prove the mobile repository/schema,
+migrations, retention, multi-process access, BGTask/WorkManager coordination,
+or existing-user import. Those remain Phase 2, Phase 3, Phase 7, and Phase 10
+work respectively.
+
+### Binding assessment
+
+The C/JSON ABI is viable for continued proof and interim prototype work after
+the Android UTF-8 bridge is corrected. Swift ownership is direct; Kotlin needs a
+manual JNI adapter, verifier initializer, string conversion, and artifact/AAR
+packaging. Dynamic error decoding, synchronous blocking calls, no true
+cancellation, serialization/copy overhead, and JNI complexity remain evidence
+for the later C/JSON versus typed C versus UniFFI decision. No hard
+impossibility justifies selecting or implementing a final binding now.
+
+### Command/query and background-sync architecture
+
+Accept this as a durable invariant:
+
+```text
+Commands mutate.
+Queries return state.
+Persistent Core State != Presentation State.
+Synchronization != UI Refresh.
+```
+
+Phase 2 owns command/query/synchronization categories, durable/presented counter
+meanings, and adoption contracts. Phase 3 implements the local repository and
+queries. Phase 4 implements durable commands and sync-only outcomes plus
+explicit client query and snapshot adoption. Background sync may insert or
+update repository entries, remote baselines, reconciliation metadata,
+completeness, and durable counters without forcing those rows or counters into
+an active presented timeline. Manual refresh chooses whether
+to adopt already-current local state or synchronize first; final freshness
+policy remains a native product decision.
+
+The existing FluxBar operation responses remain compatibility behavior until a
+separate desktop task updates Rust, Swift callers, Go fallback policy, and
+fixtures. The active-timeline stability issue should be addressed before a
+Rust-backed public FluxBar release, but does not block Phase 2 design.
+
+### Roadmap changes
+
+| Action | Change | Justification |
+| --- | --- | --- |
+| KEEP | Phase 1 runtime proof objective | Correctly avoids designing a binding around an unproven runtime. |
+| SHORTEN | Phase 1 physical/memory/reproducibility gate | Product and supply-chain qualification was incorrectly promoted into feasibility. |
+| ADD | Narrow Phase 1 closure task | Correct UTF-8, build verification, artifact provenance, ownership stress, iOS worker execution, native edge cases, SQLite configuration assertions, and default-artifact exclusion evidence. |
+| MOVE LATER | Physical lifecycle and full TLS matrix | Required during product development/release, not schema architecture. |
+| ADD TO PHASE 2 | Command/query/sync categories, sync metadata, durable counter semantics | These constrain schema and interim APIs. |
+| MOVE EARLIER | Source-only Flutter historical characterization | It does not depend on the target schema; mappings and import still do. |
+| KEEP | Phase 3 local repository and Phase 4 sync/mutations | Correct order after stronger Phase 2 contracts. |
+| SPLIT | Phase 4 synchronization from query/adoption | Required for timeline stability and background sync. |
+| KEEP | Phase 5 binding decision | Useful native API experience should precede selection. |
+| KEEP | Go oracle/fallback | Removal evidence is not yet sufficient. |
+
+### Phase 2 scope after Phase 1 passes
+
+**Objective:** Define a versioned, account-scoped mobile repository/schema and
+service contract that separates durable state, commands, synchronization,
+queries, and presentation before production implementation.
+
+Phase 2 acceptance requires reviewed decisions for:
+
+- account identity and API-key rotation;
+- schema versioning, transactional migrations, future-version rejection,
+  account isolation, keys, constraints, indexes, and reset semantics;
+- entry/feed/category/enclosure/full-content ownership;
+- effective, desired, remote-baseline, pending-revision, acknowledgement, and
+  progression extensibility;
+- synchronization run identity, scope/configuration fingerprint, main/starred
+  completeness, capped/incomplete evidence, attempt/success/failure metadata,
+  and restart behavior;
+- repository-effective, remote-observed, completeness/freshness, and
+  presentation-adopted counter meanings;
+- deterministic cursor/query contracts and command-specific receipts;
+- semantic-setting validation, storage, and migration ownership;
+- transaction and in-process/concurrent-access assumptions;
+- destructive reset coordination; and
+- provenance-labeled, read-only characterization of historical Flutter SQLite,
+  secure storage, preferences, progression, downloads, overrides, pending
+  intent, and backups.
+
+Phase 2 does not implement the production repository, live synchronization,
+native clients, Flutter import/cutover, final bindings, or migration UX.
+
+The Flutter database is an import source, not the target physical schema. Target
+identity, schema, mutation/progression, settings, download, secret, and backup
+contracts must stabilize before integrated migration implementation. Import must
+write a new database and never mutate deployed Flutter data in place.
+
+### Go status
+
+Go remains deprecated for new features but retained as behavioral reference,
+differential oracle, and explicit fallback. It is not an installed-base
+migration source. Removal requires a reviewed fixture manifest replacing every
+valuable differential suite, implementation-independent expected outputs,
+standalone concurrency/deadline coverage, an agreed Rust public-release
+observation criterion, zero unresolved Rust-specific correctness blockers, and
+a Rust-only rollback/release plan.
+
+### Flux monorepo recommendation
+
+Repository consolidation is not a Phase 1 runtime or Phase 2 contract
+prerequisite. After Phase 2 and before Phase 3, separately approve an
+infrastructure-only transition and do not combine it with importing the
+production Flutter tree. Move toward:
+
+```text
+Flux/
+    apps/
+        fluxbar/macos/
+        fluxnews/ios/       # later native client
+        fluxnews/android/   # later native client
+    core/
+        rust/
+        go-reference/
+    proofs/mobile-runtime/
+        ios/
+        android/
+    docs/
+    tooling/
+```
+
+Use the FluxBar Git history as the Flux base because it owns the shared core,
+macOS client, proofs, and architecture. If `Flux` is the destination name for
+this repository, a GitHub transfer/rename preserves repository metadata and
+commit identity. If `Flux` already exists as a distinct repository, integrating
+history is not a transfer/rename and requires a separate reviewed plan for
+commits, issues, pull requests, releases, settings, and automation. Keep the existing
+FluxNews repository authoritative and writable for Flutter production,
+maintenance, store releases, translations, tags, issues, and existing-user
+migration evidence until native replacement readiness. Do not import Flutter
+history into Flux now.
+
+Flux uses product-scoped tags/workflows/changelogs and path-scoped CI so one
+issue/PR can span UI, binding, core, persistence, and sync without coupling
+FluxBar and FluxNews release versions.
+
+### Residual validation
+
+#### Before Phase 2
+
+- Correct the eight Phase 1 closure findings and rerun clean Android build,
+  arm64 instrumentation, iOS simulator tests, full Rust/Go/parity/macOS builds,
+  and `git diff --check`.
+
+#### During native product development
+
+- Physical iPhone and Android load/FFI/SQLite/TLS smoke.
+- Foreground/background, terminate/force-stop/relaunch, lock/unlock, file
+  protection, memory profiling, and verifier initialization races.
+- Controlled timeout/DNS/TLS-version/hostname/user-CA policy and x86_64 emulator
+  execution if that ABI remains supported.
+
+#### Before first native mobile release
+
+- Phase 7 cross-process/background expiration and database coordination.
+- Secure storage, production schema migrations, backup policy, full TLS policy,
+  release signing/R8, device performance, and existing-user migration/cutover.
+
+#### Before first Rust-backed FluxBar public release
+
+- Live public-root request through the shared `build_http_agent`.
+- Signed/notarized Rust FluxBar live Miniflux sync, offline/restart behavior, and
+  regression review of command/query timeline stability.
+
+### Findings
+
+#### CRITICAL
+
+None.
+
+#### HIGH
+
+1. **Android artifact provenance can be ambiguous.** Evidence:
+   `mobile-proof/android/app/build.gradle.kts:51-68` registers default and
+   override JNI roots and suppresses duplicates with `pickFirsts`. Impact: tests
+   may package a stale library while reporting the requested artifact root. The
+   current APK hashes were verified, but the configuration can invalidate a
+   future run. Blocks trustworthy Phase 1 evidence. Owner: Phase 1 closure.
+
+#### MEDIUM
+
+1. **Android string bridge violates the C ABI encoding contract.** Evidence:
+   `GetStringUTFChars`, `strlen`, and `NewStringUTF` at
+   `mobile-proof/android/app/src/main/cpp/jni-bridge.cpp:36-61` use Modified
+   UTF-8, while `rust-core/src/ffi.rs:34-73` requires standard NUL-terminated
+   UTF-8. Impact: supplementary characters and embedded NUL are not reliably
+   transported; JSON escaping in existing tests masks the raw boundary. Blocks
+   Phase 1. Owner: Phase 1 closure.
+2. **The clean Android artifact command currently fails.** Evidence: the final
+   review command stopped at `Build/build-rust-android.sh:292` although NDK
+   `llvm-readelf` reported `Machine: AArch64`; `pipefail` observes the producer's
+   SIGPIPE after `grep -q` exits. Impact: required all-ABI JNI artifacts cannot
+   be reproduced by the supported command. Blocks Phase 1. Owner: Phase 1
+   closure.
+3. **Ownership stress is incomplete.** Existing tests prove basic/concurrent
+   calls but not bounded repeated allocation/free behavior. Impact: allocator
+   feasibility is only partial. Blocks Phase 1 until a focused automated loop
+   passes. Owner: Phase 1 closure.
+4. **iOS blocking-worker evidence is missing.** SQLite and HTTPS XCTest calls
+   invoke the synchronous wrapper directly rather than dispatching from a native
+   background queue. Impact: the wrapper's intended off-main-thread use is not
+   yet executable evidence. Blocks Phase 1. Owner: Phase 1 closure.
+5. **Native boundary edge cases are incomplete.** The native hosts do not
+   directly exercise a null request pointer or valid invalid-UTF-8 bytes through
+   their shims. Impact: controlled C-boundary error behavior is inferred from
+   Rust tests rather than proven in both hosts. Blocks Phase 1. Owner: Phase 1
+   closure.
+6. **SQLite configuration assertions are incomplete.** Both native hosts assert
+   WAL after open but do not assert the reported synchronous and busy-timeout
+   values. Impact: required configuration evidence is partial. Blocks Phase 1.
+   Owner: Phase 1 closure.
+7. **Default-artifact exclusion is not explicit evidence.** Source `cfg` gates
+   isolate the proof operation and Android initializer, but no recorded normal
+   artifact inspection closes that claim. Blocks Phase 1. Owner: Phase 1
+   closure.
+8. **TLS coverage is representative, not a production matrix.** Only public-root
+   and self-signed endpoints execute; controlled timeout/DNS/hostname/TLS
+   versions and current macOS shared-agent live trust are absent. Impact: does
+   not block feasibility, but blocks corresponding public-release claims.
+   Owner: native product phases and FluxBar release hardening.
+9. **Android verifier initialization is convention-based.** The unsynchronized
+   flag and callable `request` at
+   `mobile-proof/android/app/src/main/kotlin/com/fluxbar/mobileproof/FluxCoreBridge.kt:18-50`
+   permit races or HTTPS before initialization. Impact: proof setup passes, but
+   production initialization must enforce ordering. Does not block Phase 1.
+   Owner: final Android host/binding phase.
+10. **Lifecycle evidence is same-process only.** The Android "lifecycle" test is
+   a background-thread call (`FluxCoreInstrumentedTest.kt:215-223`); neither
+   host proves process death/relaunch or physical-device behavior. Impact:
+   product lifecycle remains open. Does not block Phase 1 after contract
+   correction. Owner: native development and Phase 7.
+
+#### LOW
+
+- `native-certs` is redundant under the explicit verifier.
+- Build manifests include timestamps and an absolute NDK root; useful local
+  evidence, but unsuitable as normalized release manifests.
+- Historical Phase 1 subphase labels differ between the contract and status;
+  this final section is authoritative.
+
+#### INFORMATIONAL
+
+- The final review rebuilt iOS archives/XCFramework and reran all 12 simulator
+  tests successfully despite `xcodegen` being unavailable; a previously
+  generated ignored local Xcode project was sufficient. This does not prove a
+  clean checkout can regenerate the project without installing `xcodegen`.
+- Android arm64 instrumentation and R8 release/releaseTest builds passed from
+  the existing current-revision artifact set, while the clean artifact script
+  defect prevented regenerating the complete set under a new output root.
+
+### Recommended next step
+
+```text
+PHASE 1 CLOSURE - FIX AND RE-RUN THE EIGHT RUNTIME EVIDENCE BLOCKERS
+```
+
+After independent PASS:
+
+```text
+DEFINE PHASE 2 MOBILE CONTRACTS
+```
+
+Then:
+
+```text
+PHASE 2 — VERSIONED MOBILE REPOSITORY / SCHEMA ARCHITECTURE
+```

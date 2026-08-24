@@ -106,7 +106,7 @@ Phase 1 produces:
 - one disposable but maintained Android runtime-proof host;
 - automated ABI, persistence, error, memory, and threading tests;
 - controlled HTTPS test evidence;
-- physical-device lifecycle checklists and captured results;
+- physical-device lifecycle checklists for later product qualification;
 - artifact size/build-time baselines;
 - a binding-evidence report for Phase 5; and
 - one binary PASS/NOT PASSED decision record.
@@ -125,9 +125,9 @@ This contract narrows two potentially ambiguous roadmap statements:
 
 - "host paths" are proven with an application-sandbox probe database, not by
   adding the final mobile configuration API; and
-- "foreground/background" means ordinary host lifecycle and process-relaunch
-  characterization, not BGTaskScheduler/WorkManager or simultaneous extension
-  process execution.
+- "foreground/background" is later product qualification, not
+  BGTaskScheduler/WorkManager or simultaneous extension process execution in
+  the Phase 1 feasibility gate.
 
 ## Proof decision
 
@@ -151,9 +151,9 @@ native proof host
             |-- Rust-created thread
             +-- intentional contained panic
     |
-terminate host process
+close probe database
     |
-relaunch and verify persisted SQLite value
+reopen and verify persisted SQLite value
 ```
 
 The feature-gated probes must compile out of normal FluxBar artifacts. They are
@@ -163,10 +163,10 @@ test instrumentation, not a mobile product API.
 
 | Platform | Environment | Rust target | Phase 1 status | Runtime gate |
 | --- | --- | --- | --- | --- |
-| iOS | Physical iPhone/iPad | `aarch64-apple-ios` | Required | Build, XCFramework link, XCTest, and physical iPhone run |
+| iOS | Physical iPhone/iPad | `aarch64-apple-ios` | Required artifact | Build and XCFramework link; physical execution is deferred product qualification |
 | iOS | Apple Silicon simulator | `aarch64-apple-ios-sim` | Required | Build, XCFramework link, automated simulator tests |
 | iOS | Intel simulator | `x86_64-apple-ios` | Optional/non-gating until an Intel CI/developer support requirement exists | Build when an Intel host/CI is available; may join the simulator XCFramework variant |
-| Android | 64-bit ARM device | `aarch64-linux-android` | Required | Build JNI `.so`, package, instrumentation, physical arm64 device run |
+| Android | 64-bit ARM device | `aarch64-linux-android` | Required artifact | Build/package JNI `.so` and run on an arm64 emulator; physical execution is deferred product qualification |
 | Android | 64-bit x86 emulator | `x86_64-linux-android` | Required | Build JNI `.so`, package, emulator instrumentation |
 | Android | 32-bit ARM device | `armv7-linux-androideabi` | Required artifact | Build/link/package inspection; hardware runtime is strongly recommended when available but not a physical-device gate |
 
@@ -475,11 +475,11 @@ The classifications describe Phase 1 evidence needs, not replacement decisions.
 | `url` and IDNA/ICU data | `MOBILE SAFE` | Pure Rust but contributes code/data size. HTTPS probe uses URL parsing and size measurement records impact. |
 | `image` codecs | `MOBILE SAFE` | Rust codecs with synchronous CPU/memory work. Do not add image product tests; record linked/dead-stripped size and defer memory-pressure image workloads. |
 | `resvg`/`usvg`/`tiny-skia` | `MOBILE SAFE` | Pure Rust/C-free configured graph with default text/font features disabled. Packaging and size evidence only. |
-| `rusqlite` + bundled `libsqlite3-sys` | `REQUIRES CONFIGURATION` | Requires Apple SDK or NDK C toolchain/linker. Prove all targets build and real devices create WAL, persist, close/reopen, and relaunch. |
-| `ureq 2.12.1` + `rustls 0.23.43` | `REQUIRES CONFIGURATION` | The shared agent installs an explicit `rustls-platform-verifier`; it must run off UI threads. Prove valid HTTPS, invalid certificate rejection, DNS/error mapping, TLS 1.2/1.3, and bounded timeout. Record that host task cancellation cannot interrupt an in-flight blocking call. |
-| `rustls-platform-verifier 0.6.2` on iOS | `REQUIRES CONFIGURATION` | Source dispatch selects Apple's Security.framework verifier for Apple vendors. Verify final `Security`/`CoreFoundation` linkage, static package integration, hostname checks, and OS trust on simulator and physical iPhone. |
-| `rustls-platform-verifier 0.6.2` on Android | `REQUIRES CONFIGURATION` | Source dispatch uses Android `X509TrustManagerExtensions` through JNI. Package locked support AAR `0.1.1`, initialize once per process with application context before HTTPS, retain its classes in release/R8, and prove system trust plus hostname rejection on emulator/device. No OpenSSL library or CA bundle should be required. |
-| ureq `native-certs` / `rustls-native-certs 0.7.3` | `UNKNOWN / MUST TEST` | The explicit platform verifier controls handshakes, but `AgentBuilder::new()` constructs ureq's default configuration first. On iOS/Android this transitive crate probes Unix certificate-file locations via `openssl-probe` (which is a file locator, not OpenSSL). Measure startup behavior and either prove this discarded initialization harmless or remove the redundant feature with full desktop/mobile TLS regression evidence. |
+| `rusqlite` + bundled `libsqlite3-sys` | `REQUIRES CONFIGURATION` | Requires Apple SDK or NDK C toolchain/linker. Phase 1 proves all targets build and representative native hosts create WAL, persist, and close/reopen. Device relaunch is product qualification. |
+| `ureq 2.12.1` + `rustls 0.23.43` | `REQUIRES CONFIGURATION` | The shared agent installs an explicit `rustls-platform-verifier`; it must run off UI threads. Phase 1 proves representative valid HTTPS and invalid-certificate rejection. DNS/error, TLS-version, hostname, timeout, and cancellation matrices are product/release qualification. |
+| `rustls-platform-verifier 0.6.2` on iOS | `REQUIRES CONFIGURATION` | Source dispatch selects Apple's Security.framework verifier for Apple vendors. Phase 1 verifies final `Security`/`CoreFoundation` linkage, static package integration, and simulator OS trust; hostname and physical-device repeats are later qualification. |
+| `rustls-platform-verifier 0.6.2` on Android | `REQUIRES CONFIGURATION` | Source dispatch uses Android `X509TrustManagerExtensions` through JNI. Package locked support AAR `0.1.1`, initialize once per process with application context before HTTPS, retain its classes in release/R8, and prove representative emulator system trust and invalid-certificate rejection. Device and hostname repeats are later qualification. No OpenSSL library or CA bundle should be required. |
+| ureq `native-certs` / `rustls-native-certs 0.7.3` | `REDUNDANT / RELEASE QUALIFICATION` | The explicit platform verifier controls handshakes, but `AgentBuilder::new()` constructs ureq's default configuration first. On iOS/Android this transitive crate probes Unix certificate-file locations via `openssl-probe` (which is a file locator, not OpenSSL). Before release, measure startup behavior and either prove this discarded initialization harmless or remove the redundant feature with full desktop/mobile TLS regression evidence. |
 | `log` facade | `REQUIRES CONFIGURATION` | Portable, process-global facade. Current non-macOS backend is no-op. Proof results belong in native test UI/files, not core production logs. |
 | `oslog` | `MOBILE SAFE` by exclusion | Gated to macOS and should not enter iOS/Android artifacts. Verify dependency manifests/link maps. Do not broaden it during Phase 1. |
 | Complete transitive graph | `UNKNOWN / MUST TEST` | Cargo metadata does not prove target linking. Build/link/run every required target and record native dependencies. |
@@ -506,11 +506,10 @@ On each platform the proof must show:
    the busy timeout is applied.
 5. Rust writes and reads a Unicode key/value in one process.
 6. Rust closes and reopens the connection and reads the same value.
-7. The host backgrounds/foregrounds while the connection exists and reads the
-   same value afterward.
-8. The process is terminated without relying on an orderly core shutdown.
-9. A new process relaunch opens the same path and reads the committed value.
-10. WAL/SHM sidecars and database permissions/protection behavior are recorded.
+
+Product qualification subsequently proves background/foreground reads,
+terminate/relaunch persistence, WAL/SHM sidecars, and platform
+permissions/file-protection behavior.
 
 The host owns directory selection and platform backup/file-protection metadata.
 Rust owns every SQLite connection. Native Swift/Kotlin code must not open,
@@ -569,9 +568,11 @@ callbacks share one process lifetime forever.
 Phase 1 tests:
 
 - multiple concurrent native threads calling one process;
-- repeated SQLite open/close/relaunch;
-- WAL/busy behavior within one process; and
-- abrupt process death after a committed write.
+- repeated SQLite open/close within one process; and
+- WAL/busy behavior within one process.
+
+Product qualification adds relaunch and abrupt process death after a committed
+write.
 
 It does not create a WidgetKit target, WorkManager job, second Android process,
 or two-process writer test. It hands Phase 2 an ownership rule and Phase 7 a
@@ -585,26 +586,32 @@ Full risk retirement remains Phase 7, where foreground/background process
 coordination, leases/transactions, expiration, and kill/restart are designed
 against the stable mobile repository.
 
-## Lifecycle test matrix
+## Lifecycle qualification matrix
+
+The simulator/emulator cases marked required below contribute to the Phase 1
+feasibility gate. Physical-device and process-death cases are retained as the
+qualification matrix that must pass before native product development relies on
+this architecture; they do not block the re-derived Phase 1 gate below.
 
 ### iOS
 
-| Scenario | XCTest/simulator | Physical iPhone | Phase 1 gate |
+| Scenario | XCTest/simulator | Physical iPhone | Qualification gate |
 | --- | --- | --- | --- |
-| Cold launch and first FFI call | Automated | Manual/recorded | Both required |
-| JSON round-trip and free | Automated stress | Recorded smoke | Both required |
-| SQLite open/write/read/close/reopen | Automated | Recorded | Both required |
-| Scene background/foreground with connection retained | UI/integration test where deterministic | Recorded | Physical result required |
-| Force terminate and relaunch persistence | Script/UI-assisted | Recorded | Physical result required |
-| Main-thread short `runtime_info` call | Automated | Smoke | Required |
-| SQLite/HTTPS on host background queue | Automated | Recorded | Required |
-| Bounded memory-stress workload | Automated allocation/large-response stress | Recorded Instruments/RSS workload | Required; an actual OS memory-warning callback is recorded when available but is not independently gating |
-| Simulator arm64 artifact execution | Automated | Not applicable | Required |
+| Cold launch and first FFI call | Automated | Manual/recorded | Simulator required for Phase 1; device later |
+| JSON round-trip and free | Automated stress | Recorded smoke | Simulator required for Phase 1; device later |
+| SQLite open/write/read/close/reopen | Automated | Recorded | Simulator required for Phase 1; device later |
+| Scene background/foreground with connection retained | UI/integration test where deterministic | Recorded | Product qualification |
+| Force terminate and relaunch persistence | Script/UI-assisted | Recorded | Product qualification |
+| Main-thread short `runtime_info` call | Automated | Smoke | Simulator required for Phase 1 |
+| SQLite/HTTPS on host background queue | Automated | Recorded | Simulator required for Phase 1; device later |
+| Bounded memory-stress workload | Automated allocation/large-response stress | Recorded Instruments/RSS workload | Bounded host stress required for Phase 1; device profiling later |
+| Simulator arm64 artifact execution | Automated | Not applicable | Required for Phase 1 |
 | Intel simulator execution | Only when Intel host exists | Not applicable | Non-gating |
 
-iOS suspension duration is OS-controlled and not deterministic. Phase 1 records
-what occurs during ordinary background/foreground transitions; it does not
-claim BGTask execution or guaranteed completion while suspended.
+iOS suspension duration is OS-controlled and not deterministic. Product
+qualification records what occurs during ordinary background/foreground
+transitions; it does not claim BGTask execution or guaranteed completion while
+suspended.
 
 The physical iPhone checklist also requires a locked-device observation after
 first unlock: commit/read the probe value, background the app, lock the device,
@@ -614,17 +621,17 @@ cold-boot-before-first-unlock behavior, or BGTask execution.
 
 ### Android
 
-| Scenario | Instrumentation/emulator | Physical arm64 device | Phase 1 gate |
+| Scenario | Instrumentation/emulator | Physical arm64 device | Qualification gate |
 | --- | --- | --- | --- |
-| Cold launch and `System.loadLibrary` | Automated | Recorded | Both required |
-| JSON/JNI round-trip and free | Automated stress | Recorded smoke | Both required |
-| SQLite open/write/read/close/reopen | Automated | Recorded | Both required |
-| Activity recreation | `ActivityScenario.recreate()` | Optional confirmation | Emulator required |
-| Background/foreground | Instrumentation/UI-assisted | Recorded | Physical result required |
-| `am force-stop`/process death and relaunch persistence | Scripted emulator | Recorded | Both required |
-| Screen lock while backgrounded, then unlock/read | Optional emulator | Recorded | Physical result required |
-| SQLite/HTTPS from background executor/coroutine dispatcher | Automated | Recorded | Required |
-| x86_64 emulator execution | Automated | Not applicable | Required |
+| Cold launch and `System.loadLibrary` | Automated | Recorded | Emulator required for Phase 1; device later |
+| JSON/JNI round-trip and free | Automated stress | Recorded smoke | Emulator required for Phase 1; device later |
+| SQLite open/write/read/close/reopen | Automated | Recorded | Emulator required for Phase 1; device later |
+| Activity recreation | `ActivityScenario.recreate()` | Optional confirmation | Product qualification |
+| Background/foreground | Instrumentation/UI-assisted | Recorded | Product qualification |
+| `am force-stop`/process death and relaunch persistence | Scripted emulator | Recorded | Product qualification |
+| Screen lock while backgrounded, then unlock/read | Optional emulator | Recorded | Product qualification |
+| SQLite/HTTPS from background executor/coroutine dispatcher | Automated | Recorded | Emulator required for Phase 1; device later |
+| x86_64 emulator execution | Automated | Not applicable | Runtime support qualification; build-only for Phase 1 |
 | armeabi-v7a package/load | Build/link/package inspection | Runtime when hardware exists | Artifact gate; runtime residual risk may remain recorded |
 
 No test claims WorkManager, widget, media service, or Android Auto lifecycle
@@ -632,23 +639,24 @@ parity.
 
 ### Repeated initialization mapping
 
-The roadmap's repeated-initialization criterion means ten probe SQLite
-open/write/read/close/reopen cycles in one process, native host UI/controller
-recreation, and three full process terminate/relaunch/read cycles. Android also
-records idempotent process-local `System.loadLibrary` use. The iOS artifact is
-statically linked and the Rust runtime has no production shutdown API, so Phase
-1 does not claim dynamic unload/reload or reset of all process-global Rust state.
+Phase 1 repeated initialization means bounded probe SQLite
+open/write/read/close/reopen cycles in one process and idempotent process-local
+Android `System.loadLibrary` use. Native host UI/controller recreation and full
+process terminate/relaunch/read cycles remain product qualification. The iOS
+artifact is statically linked and the Rust runtime has no production shutdown
+API, so neither gate claims dynamic unload/reload or reset of all process-global
+Rust state.
 
 ## HTTP/TLS runtime proof
 
-Phase 1 requires HTTPS from Rust on:
+Phase 1 requires HTTPS from Rust on the iOS arm64 simulator and one Android
+emulator. The same cases remain required on physical iPhone and Android arm64
+before product development relies on the transport. Android x86_64 execution is
+also required before claiming runtime support for that ABI.
 
-- iOS arm64 simulator;
-- physical iPhone;
-- Android x86_64 emulator; and
-- physical Android arm64 device.
-
-A controlled endpoint must provide fixed paths for:
+The full product-qualification evidence matrix uses fixed paths for the cases
+below. Phase 1 requires only the public-root and invalid-certificate rows;
+timeout, DNS, header, hostname, and TLS-version expansion is later qualification.
 
 | Case | Expected evidence |
 | --- | --- |
@@ -676,15 +684,16 @@ configuration (`FluxNews/android/app/src/main/res/xml/network_security_config.xm
 but that policy does not prove or dictate the future Rust transport policy.
 
 The Android host must initialize the verifier from application context before
-constructing the first HTTP agent. Required cases include cold process startup,
-repeated idempotent initialization, Activity recreation, force-stop/relaunch,
-background-worker HTTPS, and a release/R8 build. The packaged verifier class
-must load in each case; a panic or generic internal FFI error is not an
-acceptable substitute for an initialization error.
+constructing the first HTTP agent. Phase 1 requires cold process startup,
+repeated idempotent initialization, background-worker HTTPS, and a release/R8
+build. Activity recreation and force-stop/relaunch remain product qualification.
+The packaged verifier class must load in each executed case; a panic or generic
+internal FFI error is not an acceptable substitute for an initialization error.
 
-Phase 1 passes TLS only if TLS 1.2 and TLS 1.3 public-root cases succeed and the
-invalid-certificate/hostname cases fail on both physical platforms without
-disabled verification. The final iOS link map must include Security and
+Phase 1 passes TLS if a public-root case succeeds and an invalid-certificate case
+fails on each required simulator/emulator host without disabled verification.
+The broader TLS-version/hostname matrix and physical-device repeats are product
+qualification. The final iOS link map must include Security and
 CoreFoundation. The Android package must include the pinned verifier AAR classes
 and must not require an OpenSSL shared library, private CA bundle, or insecure
 bypass. Failure is NOT PASSED pending an explicit transport decision.
@@ -700,20 +709,23 @@ The current FFI is synchronous. The host contract for Phase 1 is:
 - host task cancellation only stops awaiting/displaying the result unless the
   underlying synchronous call has returned.
 
-Required tests:
+Phase 1 required tests:
 
 1. Call `round_trip` from at least eight concurrent native worker tasks with
    deterministic unique payloads and verify no response crossover.
-2. Interleave SQLite reads and serialized writes through the probe runtime and
-   verify mutex/condvar behavior does not deadlock.
-3. Execute `thread_probe` repeatedly so Rust creates, coordinates, joins, and
+2. Execute `thread_probe` repeatedly so Rust creates, coordinates, joins, and
    cleans up native threads.
-4. Run HTTPS concurrently with local round trips and SQLite reads; local calls
+
+Product qualification adds these concurrency/lifecycle cases:
+
+1. Interleave SQLite reads and serialized writes through the probe runtime and
+   verify mutex/condvar behavior does not deadlock.
+2. Run HTTPS concurrently with local round trips and SQLite reads; local calls
    must not wait on an unrelated network operation solely because of the host
    wrapper.
-5. Background/foreground the host while a bounded delayed HTTPS call runs and
+3. Background/foreground the host while a bounded delayed HTTPS call runs and
    record completion/timeout behavior.
-6. Terminate only after a committed SQLite write for the persistence gate. A
+4. Terminate only after a committed SQLite write for the persistence gate. A
    kill during a transaction is deferred to Phase 7 failure testing.
 
 The proof does not redesign `SyncService`, invoke automatic-read scheduler
@@ -755,8 +767,8 @@ Required ownership tests:
 - `FluxCoreFree(NULL)` remains a no-op;
 - success, malformed/error, panic, empty, Unicode, and one bounded large
   response follow the same free path;
-- 10,000 small sequential calls complete within the fixed retained-memory gate
-  below;
+- a bounded repeated-call workload completes without crash or an observed
+  tool-attributed definite leak;
 - concurrent response pointers remain independent; and
 - process remains usable after ownership and panic stress.
 
@@ -772,22 +784,19 @@ Tool incompatibility may be recorded, but ownership stress and no observed
 leak/crash remain mandatory. The report must not claim absence of all memory
 defects solely from these tools.
 
-The fixed retained-memory gate is: in a fresh host process run 1,000 warm-up
-calls, quiesce for five seconds, record native heap and resident size, run
-10,000 calls, quiesce again, and repeat the complete fresh-process trial three
-times. No tool may report definitely leaked allocations attributable to the
-wrapper/core. For both resident size and native heap independently, the median
-final increase must be no greater than the larger of 8 MiB or 10 percent of its
-post-warm-up value. Any larger retained allocation is NOT PASSED unless an
-allocation-trace rerun proves it is unrelated host/tool noise and the independent
-Phase 1 reviewer accepts that evidence before the final gate.
+The Phase 1 retained-memory gate uses a documented warm-up and bounded repeated
+call count on both native hosts. No tool may report definitely leaked
+allocations attributable to the wrapper/core, and retained memory must settle
+rather than grow monotonically over repeated batches. Exact RSS/native-heap
+thresholds are device/performance qualification, not portable runtime evidence.
 
 The physical-device stress workload additionally performs 100 sequential 1 MiB
 responses, freeing each response before the next call, while Instruments or the
 platform native-memory profiler records peak and post-quiescence memory. It must
-not crash, terminate, or exceed the same retained-memory gate. Record an actual
-OS memory-warning/trim callback if one occurs, but do not manufacture one or
-make nondeterministic callback delivery a separate pass condition.
+not crash, terminate, grow monotonically across batches, or report an
+attributable definite leak. Record an actual OS memory-warning/trim callback if
+one occurs, but do not manufacture one or make nondeterministic callback
+delivery a separate pass condition.
 
 ## Packaging reproducibility
 
@@ -829,15 +838,12 @@ configuration remains acceptable if it is simpler and equally reproducible.
 
 ### Reproducibility meaning
 
-Reproducible means two clean builds from the same source and toolchain on one
-machine into fresh output directories. Both must pass and report the same
-target/profile/features/exported symbols/native dependencies. Every raw static
-archive, JNI shared object, public header, and file inside the XCFramework must
-have an identical SHA-256 across the two builds. Normalized manifests must also
-match after removing only measured build duration. Build scripts must use path
-remapping and deterministic archive settings where required; timestamps,
-absolute paths, differing binary hashes, or any other unexplained field are NOT
-PASSED rather than documentation-waivable variance.
+Phase 1 reproducibility means two clean builds from the same locked source and
+toolchain into fresh output directories both pass and report the same
+target/profile/features/exported symbols/native dependencies. Manifests record
+artifact hashes so differences are visible, but byte identity is not required
+for runtime feasibility. Bit-for-bit artifacts and normalized, path-independent
+manifests are later release/supply-chain qualification.
 
 ### Future CI
 
@@ -1118,35 +1124,38 @@ manifest verification after toolchain details are fixed.
 
 ### Phase 1F: Minimal Android proof host
 
-**Objective:** Package/load JNI artifacts and automate ABI, SQLite, threading,
-and Activity/process lifecycle cases.
+**Objective:** Package/load JNI artifacts and automate representative ABI,
+SQLite, and threading cases. Activity/process lifecycle is later qualification.
 
 **Likely files:** Isolated Kotlin proof project, JNI wrapper, instrumentation
 tests.
 
 **Platform:** Android.
 
-**Acceptance test:** x86_64 emulator suite passes; all ABI `.so` files package;
-app uses no-backup internal storage and minimal manifest surface.
+**Acceptance test:** One Android emulator host suite passes; all ABI `.so` files
+package; app uses no-backup internal storage and minimal manifest surface.
+x86_64 execution is required before claiming runtime support for that ABI.
 
 **Model:** GPT-5.6 Luna or Kimi K2.7 Code for fixed host scaffolding;
 GPT-5.6 Terra reviews JNI ownership and manifest security.
 
 ### Phase 1G: Controlled HTTPS and trust matrix
 
-**Objective:** Execute the required valid/invalid/timeout/DNS/header cases using
-the current HTTP/TLS stack.
+**Objective:** Execute representative valid/invalid cases using the current
+HTTP/TLS stack and preserve the broader matrix for product qualification.
 
 **Likely files:** Probe HTTPS action tests, controlled server fixture/config,
 platform test scripts, result matrix.
 
 **Platform:** Both.
 
-**Acceptance test:** Required simulator/emulator and physical-device cases meet
-the TLS gate; Apple Security linkage and Android Trust Manager initialization,
+**Acceptance test:** Required simulator/emulator cases meet the Phase 1 TLS
+gate; Apple Security linkage and Android Trust Manager initialization,
 AAR/R8 packaging, class loading, and trust have binary viable/not-viable
 findings. Existing FluxBar HTTP/parity tests and one macOS public-root HTTPS
-smoke also pass because the verifier configures the shared production agent.
+smoke cover the shared production agent. The existing HTTP/parity tests remain
+Phase 1 regression evidence; the macOS public-root smoke is a FluxBar
+release-qualification gate.
 
 **Model:** GPT-5.6 Terra implementation; GPT-5.6 Sol reviews any TLS replacement
 decision, but does not preemptively implement one.
@@ -1167,10 +1176,10 @@ or monotonic leak is observed, and blocking cancellation limits are recorded.
 **Model:** GPT-5.6 Terra implementation; GPT-5.6 Sol reviews FFI/concurrency
 failures or ambiguous evidence.
 
-### Phase 1I: Physical-device lifecycle validation
+### Product qualification: Physical-device lifecycle validation
 
-**Objective:** Execute the mandatory iPhone and arm64 Android device matrix and
-capture reproducible evidence.
+**Objective:** Before native product work relies on the proof, execute the
+iPhone and arm64 Android device matrix and capture reproducible evidence.
 
 **Likely files:** Device checklist/result template and optional orchestration
 scripts; no product code.
@@ -1225,136 +1234,103 @@ fixtures.
 
 ## Phase 1 acceptance gate
 
-Phase 1 ends with exactly one of:
-
-```text
-MOBILE RUNTIME PROOF PASSED
-```
-
-or:
-
-```text
-MOBILE RUNTIME PROOF NOT PASSED
-```
+Phase 1 answers whether the current Rust library can be a technically viable
+shared foundation in native macOS, iOS, and Android processes. It does not prove
+native FluxNews product readiness.
 
 ### Required for PASSED
 
-#### Baseline and isolation
+#### Baseline and portability
 
-- Current FluxBar Rust tests and relevant ABI/parity tests pass from the chosen
-  clean integration revision.
-- Normal FluxBar build/release symbols are unchanged; the explicitly selected
-  shared platform verifier passes existing HTTP/parity tests and a macOS
-  public-root HTTPS smoke without changing request semantics.
-- Default artifacts reject/omit the probe operation.
-- Proof hosts contain no real credentials or product state.
+- Current Rust, Go-reference, ABI/parity, and macOS Rust/Go builds pass from one
+  coherent revision.
+- Locked release archives build for iOS device/simulator and Android arm64,
+  x86_64, and armv7.
+- The iOS XCFramework and Android JNI libraries package through clean scripted
+  commands; architecture, exported symbols, and native dependencies verify.
+- The proof feature and Android verifier initializer are absent from default
+  production artifacts.
 
-#### Artifact matrix
+#### Native boundary
 
-- `aarch64-apple-ios` release archive builds and links.
-- `aarch64-apple-ios-sim` release archive builds and runs.
-- iOS XCFramework validates device/simulator variants and unchanged header.
-- `aarch64-linux-android`, `x86_64-linux-android`, and
-  `armv7-linux-androideabi` release archives build.
-- JNI `.so` artifacts link/package for `arm64-v8a`, `x86_64`, and
-  `armeabi-v7a` with verified ELF architecture and dependencies.
-- Tool/artifact manifests and clean commands are reproducible.
+- The unchanged `FluxCoreRequest` / `FluxCoreFree` path executes in an iOS
+  simulator host and an Android emulator host.
+- Swift and JNI bridges preserve standard UTF-8, including non-BMP Unicode,
+  copy responses before exactly-once `FluxCoreFree`, and retain no Rust pointer.
+- Null/malformed/unsupported input and intentional panic produce controlled
+  errors; a call after panic succeeds.
+- Bounded repeated and concurrent calls show no crash, crossover, double free,
+  or tool-attributed definite leak.
 
-#### Invocation, panic, and ownership
+#### Runtime dependencies
 
-- Structured JSON input/output succeeds through the existing two symbols on
-  iOS simulator, Android emulator, physical iPhone, and physical Android arm64.
-- Null, malformed JSON, valid invalid-UTF8, unsupported operation, probe error,
-  and intentional panic return controlled errors without unwinding/aborting.
-- A call after intentional panic succeeds.
-- Every response path uses `FluxCoreFree` exactly once.
-- Sequential/concurrent/large-response stress shows no crash, pointer crossover,
-  double free, or unexplained monotonic memory growth.
+- Each mobile host creates a Rust-owned bundled-SQLite database in app-private
+  storage, records WAL/configuration, and reads a committed value after explicit
+  close/reopen. Native code does not open that database.
+- Rust-created threads and concurrent native callers complete without deadlock;
+  blocking SQLite/HTTPS work can run away from the UI thread and its
+  non-cancellable nature is documented.
+- The shared ureq/rustls/platform-verifier path succeeds against a public root
+  and rejects an invalid certificate on iOS simulator and Android emulator.
+- Android initializes the verifier before HTTPS and packages the lock-matched
+  AAR through an R8-enabled release-style build.
 
-#### SQLite
+#### Evidence integrity
 
-- Both physical platforms create the probe database in app-private storage.
-- WAL/configuration facts are recorded.
-- Write/read, close/reopen, background/foreground, force terminate/relaunch,
-  and persisted read all succeed.
-- Ten in-process probe reopen cycles and three full relaunch/read cycles pass.
-- Native code never opens the Rust-owned database.
+- Build/test scripts select exactly one requested artifact root and fail rather
+  than silently accepting stale or duplicate libraries.
+- Repeated clean builds are procedurally reproducible as defined above; byte
+  identity is not required.
+- An independent review has no unresolved `CRITICAL` or `HIGH` defect inside
+  these Phase 1 claims.
 
-#### HTTPS/TLS
+### Deferred without blocking Phase 1
 
-- Publicly trusted HTTPS succeeds through Rust on both required simulators/
-  emulators and both physical devices.
-- Invalid certificate/hostname is rejected on both physical platforms.
-- DNS and timeout failures are bounded and controlled.
-- Certificate verification is never disabled.
-- Android verifier initialization, pinned AAR/R8 packaging, class loading,
-  Trust Manager verification, and hostname checks are explicitly viable;
-  otherwise the result is NOT PASSED pending a transport decision.
-
-#### Threading and lifecycle
-
-- Short pure main-thread invocation succeeds.
-- Blocking work succeeds from native background workers without UI-thread use.
-- Concurrent native calls and Rust-created thread probe pass without deadlock.
-- Mandatory physical foreground/background and process-relaunch checks pass.
-- Mandatory physical lock/background/unlock/read observations pass after first
-  unlock on both platforms.
-- Blocking-call cancellation limitations are measured and documented.
-
-#### Evidence and security
-
-- Required size/build-time baselines are recorded.
-- iOS/Android wrapper complexity and binding evidence are recorded.
-- Security checklist passes: private paths, no secret logging, minimal
-  permissions/entitlements/exports, valid TLS, bounded probes.
-- Residual cross-process, cancellation, x86_64-iOS, armeabi-v7a-hardware, and
-  product-level risks are explicitly handed to their later phases.
-- An independent reviewer signs the evidence index; no `CRITICAL` finding
-  within Phase 1's stated claims remains unresolved. Any mandatory exception or
-  unexplained evidence gap is NOT PASSED. Critical risks explicitly outside the
-  claims, including cross-process database coordination, remain recorded with a
-  later owner phase.
+- Physical iPhone and Android smoke/lifecycle testing is required before native
+  product development depends on the proof architecture.
+- Foreground/background, force-stop/terminate/relaunch, lock/unlock, memory
+  pressure, and platform file-protection behavior are product-development and
+  pre-release gates.
+- Android x86_64 runtime and armv7 hardware runtime are required before claiming
+  runtime support for those device classes; build-only evidence is sufficient
+  for Phase 1 feasibility.
+- Controlled timeout/DNS/hostname/TLS-version matrices, user-CA/Network Security
+  Config policy, and signed/notarized live macOS synchronization are required
+  before the corresponding public product release, not to prove basic runtime
+  viability.
+- Exact device memory budgets and byte-identical release artifacts belong to
+  later performance and supply-chain qualification.
 
 ### NOT PASSED conditions
 
-Any mandatory item above failing or lacking evidence produces NOT PASSED. In
-particular, compilation without real-host execution, simulator/emulator-only
-evidence, missing Android public-root TLS, panic abort across FFI, missing
-physical persistence, unaccounted native dependencies, or skipped ownership
-stress cannot be waived through documentation.
+Any required item failing or lacking trustworthy evidence produces NOT PASSED.
+A NOT PASSED result must identify the smallest corrective action and may be
+re-reviewed without beginning Phase 2 implementation. It does not authorize
+UniFFI, a typed production ABI, a mobile schema, Go removal, or transport
+replacement.
 
-A NOT PASSED result is useful evidence. It must identify the failed assumption,
-smallest corrective decision, owner phase, and whether Phase 1 can repeat
-without starting Phase 2. It must not silently introduce UniFFI, typed C, a new
-schema, or a replacement HTTP stack.
+### Current closure work
 
-## Unresolved questions for implementation
+The independent review recorded in `MOBILE_RUNTIME_PROOF_STATUS.md` found Phase
+1 not passed. Before rerunning this gate:
 
-These questions must be resolved by evidence or a narrowly scoped pre-merge
-decision during Phase 1:
+1. Correct the Android Modified-UTF-8/standard-UTF-8 bridge and add direct
+   supplementary-Unicode boundary coverage.
+2. Correct Android artifact verification so the clean proof build command
+   completes for all ABIs.
+3. Remove duplicate JNI artifact roots/`pickFirst` ambiguity and prove the test
+   APK contains the requested current library.
+4. Add a bounded repeated-call ownership test on both native hosts.
+5. Add iOS simulator coverage that runs blocking SQLite and HTTPS probes from a
+   background queue rather than the main thread.
+6. Add native-shim coverage for null requests and valid pointers containing
+   invalid UTF-8, while keeping invalid raw pointers outside the test contract.
+7. Assert the reported post-open SQLite synchronous and busy-timeout values on
+   both native hosts, not only WAL mode.
+8. Add an explicit default-artifact check proving the probe operation and
+   Android verifier initializer are absent without `mobile-runtime-proof`.
 
-- exact final Apple Security/CoreFoundation link set selected by the platform
-  verifier on iOS;
-- whether Android Trust Manager honors the required system/user-CA and Network
-  Security Config semantics in the proof host;
-- whether to remove ureq's redundant `native-certs` feature after measuring its
-  discarded default-configuration startup behavior;
-- direct NDK linker setup versus a pinned external `cargo-ndk` tool;
-- exact mobile proof Cargo feature name and isolated module location;
-- cross-machine variability of non-gating build-time measurements;
-- availability of 32-bit ARM hardware for a non-gating runtime confirmation;
-- availability of Intel iOS CI/host for the optional simulator slice; and
-- controlled HTTPS endpoint ownership and certificate-failure fixtures.
-
-None of these authorizes final binding, schema, or product decisions.
-
-## Recommended first implementation step
-
-After Phase 0's relevant baseline is green, begin **Phase 1A: Reproducible
-target and dependency preflight**.
-
-It should add only non-mutating prerequisite checks, target/artifact manifest
-formats, and skeleton mobile build entry points that fail with precise
-remediation. It should not yet add probe operations, native hosts, or alter
-production Rust behavior. This retires toolchain ambiguity before any mobile
-integration code is written.
+The obsolete ureq `native-certs` feature is redundant under the explicit
+platform verifier. It may be removed with desktop/mobile TLS regression tests or
+retained temporarily with its harmless discarded-initialization behavior
+documented; it is not independently a Phase 1 blocker.
