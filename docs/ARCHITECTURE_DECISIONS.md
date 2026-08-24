@@ -1,325 +1,297 @@
-# FluxBar Desktop Architecture Decisions and Invariants
+# Flux Architecture Decisions
 
-These are durable decisions. Do not violate them accidentally during
-local feature work. They describe required product and architecture
-invariants, not an implementation-status list; feature documents
-identify which parts are currently available.
+> **Status: ACTIVE / AUTHORITATIVE TARGET ARCHITECTURE**
+>
+> This document records explicitly agreed decisions for the shared Flux architecture. It describes the target state, not necessarily the current implementation. Historical roadmaps and compatibility contracts do not override it.
 
-## Product Boundary
+## 1. Target
 
-### Desktop is a news inbox, not a full RSS reader
+Flux uses one shared Rust core for business/background responsibilities and native clients for macOS, iOS, and Android.
 
-FluxBar Desktop primarily supports discovery, scanning, triage, state
-management, and quick access.
+The former Go core is retired. No new work should preserve Go compatibility or build transitional Go/Rust parity unless explicitly requested for historical investigation.
 
-Do not grow the desktop application into a traditional
-three-column/full-reader experience without an explicit product
-decision.
+UniFFI is the selected binding technology for Swift and Kotlin/native clients.
 
-### Web articles open in the browser
+## 2. Responsibility boundary
 
-Normal web articles should open in the user's configured/default
-browser.
+### Rust core
 
-Do not add an embedded browser or full article-reading surface as a
-convenience implementation detail.
+Owns persistence and durable data state, Miniflux API communication, sync/reconciliation, durable mutations, article/feed/category domain data, core settings, content processing, cache/media metadata, queries, and structured change/error events.
 
-The browser preserves publisher login/paywall sessions, cookies,
-extensions, password managers, accessibility configuration, comments,
-interactive content, and the publisher's intended
-monetization/presentation.
+### Native clients
 
-### Podcasts are an intentional exception
+Own UI/presentation state and OS integration: navigation, visible list snapshots, scroll position, gestures, dialogs, layout/theme, browser/share behavior, secure credential storage, native scheduling/background transfer, playback engines, widgets, and OS notification presentation.
 
-Playable podcast media may be consumed inside FluxBar. Audio playback is
-not required to follow the browser-first article rule.
+Core APIs express domain intent, never UI mechanisms. A swipe, button, context menu, pull-to-refresh, or scroll gesture is translated by the native client into a domain operation.
 
-## Platform Boundaries
+## 3. Queries, snapshots, counts, and events
 
-### Shared behavior belongs in the portable core
+The UI can query core data at any time. Core changes also emit structured events, including changes initiated by the UI itself.
 
-Platform-independent Miniflux, sync, state, filtering, and reusable
-media/business behavior belongs in the portable core where practical.
-Rust is the default implementation and future shared core. The existing Go
-core is deprecated for future development but remains a behavioral reference
-and explicit temporary fallback.
+Events inform; they do not force presentation refresh. Visible lists and counts change only when the native UI chooses to query again.
 
-Do not duplicate business rules in SwiftUI merely because the UI needs
-them. The language migration must preserve this boundary rather than
-move business logic into native clients.
+Article queries support at least:
 
-### Native UI is preferred over shared cross-platform UI
+- scope: all / category / feed
+- read filter
+- starred filter
+- sort: newest first / oldest first
+- pagination (`limit = 0` means all matching items)
 
-macOS should use native SwiftUI/AppKit and follow macOS conventions.
+Sorting uses publication time only.
 
-Future Windows/Linux support should reuse the product semantics and
-portable core, not force a pixel-identical UI or cross-platform toolkit
-onto macOS.
+Counts are point-in-time core queries and respect the selected view/filter. Background changes do not silently replace visible counts.
 
-### Localization ownership follows the product boundary
+List queries should return compact article summaries; full content is requested separately for article detail.
 
-The FluxBar compatibility surface keeps shared application strings and current
-JSON catalog semantics behind the portable core; Rust and Go remain compatible
-while Go is retained. Localization must not depend on Fyne or another UI
-framework.
+## 4. Stable visible list snapshots
 
-Future native FluxNews UI, widgets, automotive surfaces, and platform metadata
-use native Swift/Kotlin catalogs. Rust owns stable typed/domain error identity
-and non-presentational fallback text where required, not the complete native UI
-catalog. This avoids coupling independent native products to FluxBar's legacy
-`go-i18n` resource format.
+A background core change must not unexpectedly rebuild a list the user is currently using.
 
-New FluxBar compatibility/core-owned strings must use stable, descriptive keys
-and provide an English caller fallback. Add each key to the English and
-supported locale catalogs in the same change. Existing `fmt` placeholders
-remain valid for parameterized messages; plural messages use `go-i18n` plural
-forms and named template data. Native FluxNews UI strings follow their platform
-catalogs instead.
+With Sync-on-Start enabled:
 
-### macOS is Menu Bar first
+1. load and display local state immediately;
+2. run sync in parallel;
+3. if the user has not scrolled or otherwise meaningfully interacted with the list by sync completion, the native UI may automatically refresh the snapshot;
+4. after interaction, keep the snapshot stable and signal new data through an event/badge until the UI intentionally refreshes.
 
-The primary macOS experience is a Menu Bar item opening a native
-popover.
+Sync-on-Start is optional. When disabled, app start only loads local state.
 
-A conventional full Dock window is not required for normal use.
+Resume follows the same stable-snapshot rule. Data obtained by a background sync while the app was suspended is signalled, not pushed into the visible list.
 
-### macOS uses a narrow native core bridge
+Deep-link/widget/notification launches prioritize the explicit target/action. Later resumes return to the normal snapshot rules.
 
-The native macOS target links the Rust core by default, with Go retained as an
-explicit fallback, and exchanges serialized request/response payloads through a
-small C ABI.
-Keep platform-independent Miniflux and browse semantics behind this
-boundary; do not grow a parallel Swift networking implementation.
+A background-only OS launch builds no UI.
 
-Browse snapshots are explicitly versioned so the native client and portable
-core can evolve their schema deliberately.
+After process restoration, native clients should restore prior presentation state where supported; core changes still do not force a presentation rebuild.
 
-## Navigation and Layout
+On foreground → background, flush transient UI work that must become durable, currently including pending scrollover batches and playback checkpoints. This transition does not itself force a sync.
 
-### Sidebar is hidden by default
+## 5. Mutations and bulk semantics
 
-Feed/category navigation is available on demand rather than permanently
-consuming space.
+A mutation is successful for normal offline-first use once it is safely persisted locally.
 
-### Navigation expands the popover
+Bulk UI actions pass the exact article IDs the user acted on. The core does not expand a UI-selected set based on newer database contents. The core deduplicates bulk IDs before processing.
 
-Opening the sidebar should expand the popover horizontally instead of
-significantly shrinking the article content column.
+Opening an article always marks it read. Read/unread and starred are explicit reversible domain states.
 
-The content column should remain approximately stable in width so
-article rows do not reflow dramatically.
+### Delivery policy
 
-### Navigation state is independent from the view
+- **Live:** persist locally, then immediately attempt Miniflux delivery.
+- **Deferred:** persist locally and deliver on the next normal sync opportunity.
 
-Feed/category/filter selection must not be encoded only as sidebar UI
-state. The same selection must be reusable by Spotlight/App Intents,
-notifications, shortcuts, and future deep links.
+If Live delivery fails transiently, the mutation remains safely pending, delivery temporarily behaves as Deferred, and the UI receives an event.
 
-Native entry points must converge on one route-to-selection translation.
-Process-level integration may queue a route during cold launch, but must
-not create an independent navigation state.
+## 6. Sync
 
-### Unread is a per-destination filter
+All ordinary triggers use one operation:
 
-All News, categories, and feeds default to unread-only and independently
-remember whether they show unread or all matching articles. The native
-sidebar does not require a separate Unread destination. Starred is a
-distinct destination and includes read and unread starred articles.
+`sync(reason)`
 
-## Article Presentation
+Reasons identify the trigger, e.g. Manual, AppStart, Resume, Background, Widget. They must not become hidden behavior switches.
 
-### Rows optimize scanning, not reading
+The normal sync order is:
 
-The macOS default is a compact desktop row with thumbnail left and
-content right.
+1. send pending mutations;
+2. acknowledge successful mutations;
+3. fetch remote data;
+4. reconcile;
+5. run retention cleanup;
+6. update sync state and emit events.
 
-Avoid heavy mobile-style cards or large vertical hero images as the
-default.
+A failure that undermines the whole run (connectivity/timeout, transient server failure, auth failure, local persistence/integrity failure) may abort early. Isolated entity/data-processing failures should be contained where safe.
 
-### Secondary actions use progressive disclosure
+Background sync is independently configurable from Live/Deferred mutation delivery and can be disabled completely. When enabled it is a full normal sync, including pending mutations.
 
-Read/star may appear as quick hover controls. Less frequent actions
-belong in an overflow/context menu.
+`last_successful_sync_at` is persisted and queryable.
 
-No important action may depend solely on swipe gestures.
+### Rebuild
 
-## Local Data and Sync
+Local reset recovery is a separate operation:
 
-### Local data renders first
+`rebuild_local_state()`
 
-Opening the popover must not require a successful Miniflux request.
+It is not another `sync(reason)` mode. Rebuild and normal sync should reuse low-level API/persistence primitives where sensible but keep separate orchestration.
 
-Render current SQLite state immediately, then synchronize in the
-background.
+## 7. Retry and error model
 
-### Persistent core state is independent from presentation state
+Errors are classified by retry semantics rather than exposing raw HTTP behavior as product logic.
 
-Synchronization may update the persistent core state — including entries,
-counters, remote baselines, and reconciliation metadata — without replacing
-the snapshot currently presented by a native client.
+Automatically retryable/backoff candidates include connectivity failures, timeouts, DNS/connection failures, transient 5xx responses, and 429 (respect `Retry-After` where available).
 
-An active article list is presentation state owned by the client. It changes
-only when the client explicitly requests and adopts a new snapshot.
+401/403, invalid configuration/requests, and local persistence/storage failures are not automatic retry loops and must be surfaced structurally to the UI.
 
-This separation allows background synchronization to prepare current data
-without disturbing a timeline the user is actively reading.
+404/stale entities and conflicts are reconciled according to domain semantics.
 
-### Sync is not UI refresh
+Data-processing failures should be isolated where possible; one bad image or metadata record should not unnecessarily fail an entire sync.
 
-Remote synchronization and presentation refresh are separate operations.
+Runtime health may distinguish at least Healthy, ConnectivityDegraded, and ServerDegraded.
 
-A background sync may fetch and persist new remote data while the visible
-timeline and displayed counters remain unchanged. A later user-initiated
-refresh may adopt the already-current local state without requiring another
-network request.
+Backoff is runtime-only and may use failure count plus `next_retry_at`; it need not survive process restart. Manual sync overrides backoff and forces a new attempt.
 
-The client owns refresh policy. Depending on freshness and product context,
-it may:
+## 8. Miniflux account and credentials
 
-- adopt the latest local snapshot immediately;
-- trigger remote synchronization and then adopt a snapshot; or
-- keep the current presentation unchanged.
+One Miniflux account per installation is sufficient.
 
-Do not couple successful synchronization, mutations, or persistence changes
-to implicit replacement of an active presentation snapshot.
+The native secure store permanently owns the API key/secret. It is injected once into core runtime state during initialization, never persisted in the core database, and never logged.
 
-### Miniflux remains the remote source of truth
+Non-sensitive connection configuration such as the Miniflux base URL may be persisted by the core.
 
-Local state exists for responsiveness, resilience, and synchronization.
-It does not replace Miniflux as the authoritative remote service.
+## 9. Article data and content processing
 
-### Image cache is disposable
+Persist a flexible Miniflux-aligned article model plus centrally processed content.
 
-Images are cached separately from durable article/state data. Clearing
-image cache must not destroy application state.
+Keep:
 
-### Offline inbox does not imply offline full-reader
+- original Miniflux HTML content;
+- canonical processed Markdown/full content;
+- cleaned text-only preview.
 
-Locally stored metadata and cached images may keep the inbox useful
-without connectivity. FluxBar does not need to persist/render complete
-articles solely to become an offline reader.
+The core owns HTML sanitization/normalization, HTML → Markdown conversion, common content fixes, and preview generation. Native clients render the resulting content and own typography/theme/styling.
 
-## Automatic Read State
+Content processing should support a processing-version concept so stored articles can be reprocessed after pipeline improvements.
 
-### Scrollover requires meaningful visibility
+The preview has a fixed core maximum of approximately 1000 characters. Per-feed preview and full-text limits are independent and non-destructive: stored complete content is not truncated merely because the UI requests a shorter representation.
 
-An article must not be marked read merely because it left the viewport.
+## 10. Retention and local article set
 
-It must first be meaningfully visible for a minimum amount of time/area
-and then be intentionally scrolled past upward.
+Retention is time-based (intended user choices include 30/60/90/180/365 days) and applies only to **read** articles.
 
-### Jumps do not imply reading
+Unread articles are retained regardless of age.
 
-Scrollbar jumps, programmatic scrolling, feed/category changes,
-deep-link navigation, restored scroll positions, and skipped rows must
-not mass-mark unseen articles as read.
+Independent retention protections include:
 
-### Automatic read state should be undoable
+- starred;
+- active download;
+- existing download.
 
-Desktop scroll behavior is imprecise enough that a lightweight undo
-affordance is desirable after automatic read mutations.
+Removing one protection does not negate another.
 
-## Notifications
+Retention cleanup runs only during a normal sync. A very old unread article may therefore remain locally until a later sync after it is marked read.
 
-### Sync itself is never notification-worthy
+Initial/rebuilt local state includes at least:
 
-A successful background sync is an implementation detail.
+- all unread articles;
+- read articles inside retention;
+- all starred articles;
+- articles required by active/existing downloads.
 
-Only user-relevant new content from explicitly enabled feeds/categories
-may generate notifications.
+## 11. Search
 
-### Notifications are opt-in and selective
+Search initially remains Miniflux online full-text search without additional Flux filtering or local FTS.
 
-Default notification behavior should be off. Users opt into feeds that
-matter enough to interrupt them.
+Remote search results may be displayed without automatic persistence. A remote result becomes durable local data when the user stars it or starts a download.
 
-Avoid notification storms; batch/group where appropriate.
+## 12. Feeds, categories, navigation, and feed preferences
 
-## Podcasts
+Navigation is category → feed. Categories need ID/name/count. Feeds need ID/category/name/icon/count for normal navigation; URL/error state need not be part of that navigation DTO.
 
-### Position synchronization is preserved
+The core owns feed-icon acquisition, cache/processing, and suitable light/dark variants for transparent low-contrast icons. Native UI requests and renders the appropriate variant.
 
-Desktop playback must preserve the existing synchronized
-playback-position concept.
+Article image discovery/download/disk cache belongs to the core; native UI triggers lazy loading, decodes/renders images, and may maintain a memory cache. Background sync does not preload article images.
 
-### Now Playing complements the app player
+Feed preferences have global defaults plus per-feed overrides. Current intended preferences include independent preview/full-text limits, enclosure-image preference, opening via Miniflux web instead of publisher URL, and text-only behavior.
 
-macOS Now Playing/system media controls are additional control surfaces.
-They do not replace direct FluxBar player controls.
+Feed/category core preferences are device-local and are not automatically synchronized across devices. Device backup and explicit config export/import are separate mechanisms.
 
-### Stop and Eject are distinct
+Flux may add user-defined feeds. The native UI gathers URL/category/options; the core performs Miniflux communication. Feed discovery is delegated entirely to Miniflux. General feed/category edit/delete remains in the Miniflux web UI for now.
 
-Stop halts playback while the episode may remain loaded.
+Curated feeds remain a static repository-maintained list and may be extended through repository change requests/PRs.
 
-Eject removes the active episode/player state and allows the mini-player
-to disappear.
+Miniflux Save/third-party integration is a core-wrapped Miniflux API operation, not a duplicated service implementation.
 
-### Chapters and speed are first-class controls
+## 13. Storage and settings
 
-Chapter navigation and playback speed are important desktop podcast
-functions, not obscure advanced settings.
+The native platform supplies semantic storage roots to the core, at least:
 
-## Core Language Migration Invariant
+- persistent data;
+- regenerable cache;
+- media.
 
-The Go-to-Rust migration is intentionally staged.
+The core does not guess OS sandbox paths and owns organization/lifecycle inside the supplied roots.
 
-The existing C/JSON boundary and SQLite representation are compatibility
-boundaries for the first migration. Rust should first become an
-interchangeable implementation behind the same native contract.
+Core-domain settings are persisted by the core. Pure presentation preferences remain native. Secrets remain in native secure storage.
 
-``` text
-macOS native client
-        │
-    C / JSON contract
-      ┌─┴─┐
-      │   │
-     Go  Rust
-```
+Regenerable icons/images are cache. Downloaded media is separate and should normally not be included in device backup; durable metadata remains persistent.
 
-The Go implementation remains the behavioral reference/fallback while it is
-retained. The developer build supports both cores through `FLUX_CORE=rust`
-(default) and `FLUX_CORE=go`, while Xcode consumes the same
-`libfluxcore.a` / `libfluxcore.h` artifact contract regardless of
-implementation. Go is deprecated for future feature development. The completed
-compatibility implementation through the development-default phase must not be
-retroactively combined with unrelated feature, database, UI, or product
-redesign.
+## 14. Config export/import and local reset
 
-Rust persistence must use the existing unversioned SQLite schema rather than
-introducing a Rust-specific database or migration version. The portable store
-receives an explicit database path; platform path discovery remains outside
-the persistence layer. SQLite row representations may contain remote baseline
-and compatibility state that must not leak into pure domain models.
+Configuration export contains configuration, not article/media/cache data.
 
-Sync compatibility requires separate persisted remote baselines and effective
-local desired state. A pending mutation protects the effective value from a
-stale remote refresh. Negative reconciliation is permitted only after the
-remote adapter has produced a complete, stable selection. Pending rows and
-Undo metadata remain account-scoped and durable across process restart.
+The user can export without secrets or include secrets only in a strongly encrypted password-protected export.
 
-Rust sync/flush uses blocking, account-bound orchestration without an async
-runtime. Refresh and pending flush serialize on a per-service gate;
-same-account reconfiguration and account round trips must reuse that gate while
-its service remains alive. Retained account services share one runtime-wide
-SQLite connection, while icons use independent
-cache/single-flight synchronization. Never hold SQLite ownership or icon state
-across Miniflux network I/O. Public operation deadlines include waits for the
-refresh/flush gate or SQLite ownership. Synchronous SQLite/image calls cannot
-be cancelled mid-call and require immediate post-call deadline checks;
-committed pending work must be scheduled before such a check can return an
-error. The Miniflux HTTP library timeout and delayed automatic-read timer remain
-separate limits.
-Delayed work may retain its original account service after reconfiguration,
-but can never use the replacement account's store or remote client. Pending
-revision acknowledgement must preserve a newer concurrent local value.
+A local core-data reset removes synchronized core data and regenerable caches but preserves settings/preferences, native UI preferences, credentials, and downloaded media.
 
-Core mutation, query, synchronization, and presentation responsibilities must
-remain separable. Commands must not implicitly replace a client's active
-presentation snapshot, and synchronization may advance persistent state without
-forcing presentation state to advance with it. See
-`CORE_COMMAND_QUERY_SEPARATION.md`.
+`rebuild_local_state()` then restores the required local article set, including starred articles and article records needed for preserved downloads.
 
-After mobile runtime and API behavior are characterized, C/JSON, a typed C ABI,
-and UniFFI may be evaluated as mobile adapters. That decision is independent
-from the stable FluxBar C/JSON API and must not leak FFI concerns into the Rust
-domain model. See `SHARED_RUST_CORE_ROADMAP.md`.
+## 15. Media and podcasts
+
+The core persists enclosure/download metadata, durable download state, article↔download association, playback progress, cleanup rules, and downloaded-file metadata analysis.
+
+Actual long-running background file transfer is native so each OS can use its supported background facilities. Native transfer reports completion/result back to the core; the core validates/analyzes the file and emits state changes.
+
+Downloaded files may be inspected for chapters, artwork, and embedded metadata because enclosure metadata can be sparse.
+
+Playback itself is native: audio engine/session, play/pause/seek, Now Playing/lockscreen, CarPlay/Android Auto. The core persists playback progress. Native players write periodic checkpoints (roughly 15–30s) and event checkpoints such as pause/stop/seek/lifecycle transitions.
+
+Downloaded/active media protects the associated article from normal retention.
+
+## 16. Notifications
+
+OS notifications are off by default and can be enabled explicitly per category for background sync.
+
+For each enabled category, a background sync produces at most one notification with the count of articles newly discovered by that sync. Already-notified articles must not be counted again.
+
+The core produces notification candidates; the native client posts the OS notification and acknowledges successful handoff before the core marks it delivered.
+
+The design does not require Firebase/FCM or a custom push service.
+
+## 17. Widgets
+
+Each native widget instance owns its own presentation/configuration state.
+
+Supported data scopes include All, Starred, Category, and Feed. Widget queries support pagination; `limit = 0` allows the complete matching list where the platform can display it.
+
+Widgets call the same standardized core operations and may trigger `sync(reason = Widget)`. If direct mutation/sync execution is unsuitable on a platform, the widget may open the main app with the required intent and let the normal app/core path execute it.
+
+## 18. Opening and sharing articles
+
+When opening a publisher link, native code first tries an appropriate installed app/deep-link association. If unavailable and supported by the platform, a native user preference chooses in-app browser or external/default browser.
+
+Widgets follow the same opening policy.
+
+Sharing is entirely native; the core supplies article data such as title/URL.
+
+## 19. Localization
+
+All user-facing localization is native and managed through Weblate across platforms.
+
+The core emits stable structured error/event codes and English technical diagnostic messages, not localized UI strings.
+
+## 20. Logging and diagnostics
+
+Normal structured logs have limited detail and roughly seven-day retention. An explicit debug mode may collect more detail with a shorter retention of roughly two to three days.
+
+Core and native logs should be combinable for diagnostics/support export.
+
+Secrets (API keys, authorization headers, tokens, passwords, credentials) are never logged. Prefer preventing sensitive fields from reaching logging APIs rather than relying only on redaction.
+
+## 21. Decisions intentionally still open
+
+These should be decided when they materially affect durable implementation, not through broad speculative analysis:
+
+- concrete SQLite schema;
+- concrete Rust HTML/Markdown/sanitization libraries;
+- exact backoff timings;
+- exact encrypted config container/KDF/AEAD choices;
+- logging library;
+- final DTO/API names;
+- detailed media cleanup options;
+- exact UI defaults;
+- remaining feature-gap details found while implementing against FluxNews/FluxBar reference evidence.
+
+## 22. Working principle
+
+Prefer durable implementation over possibility analysis.
+
+Before commissioning a PoC, compatibility study, or broad audit, identify the concrete decision it will unblock. If no current implementation decision depends on the answer, defer the analysis.

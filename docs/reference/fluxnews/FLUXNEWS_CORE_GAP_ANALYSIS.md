@@ -1,3 +1,5 @@
+> **Status: historical feature-inventory evidence.** Use this document to avoid losing existing FluxNews capabilities, not as an implementation roadmap or target architecture. If it conflicts with `docs/ARCHITECTURE_DECISIONS.md`, the architecture decisions win.
+
 # FluxNews to Rust Core GAP Analysis
 
 ## Scope and source revisions

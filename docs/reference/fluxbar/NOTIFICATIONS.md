@@ -1,3 +1,5 @@
+> **Status: historical product/reference evidence.** This document may describe FluxBar-specific current or legacy behavior. It is not authoritative for the shared Flux Rust-core target architecture. If it conflicts with `docs/ARCHITECTURE_DECISIONS.md`, the architecture decisions win.
+
 # FluxBar Desktop Notifications
 
 ## Current Implementation Status

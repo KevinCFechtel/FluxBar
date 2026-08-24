@@ -2,237 +2,66 @@
 
 ## Goal
 
-Work efficiently and conservatively in FluxBar Desktop.
+Build Flux toward one shared Rust core consumed by native macOS, iOS, and Android clients.
+Prioritize durable product value. Avoid temporary architectures, compatibility layers, PoCs, migrations, or refactors that are expected to be replaced shortly afterward.
 
-Prefer small, focused changes that preserve the existing architecture
-and the product direction documented under `docs/`. Do not introduce
-unnecessary abstractions, dependencies, migrations, cross-platform UI
-frameworks, or unrelated refactors.
+The human developer owns product and architecture decisions. Do not silently introduce or reopen major design choices.
 
-The human developer remains responsible for architectural and product
-decisions. Make important design choices explicit instead of silently
-introducing them.
+## Architecture Authority
 
-## Repository Context
+For non-trivial work, use this order of authority:
 
-Before non-trivial work, read only the documentation relevant to the
-task:
+1. `docs/ARCHITECTURE_DECISIONS.md` — authoritative target architecture and explicitly agreed product/core boundaries.
+2. Current Rust implementation and tests — evidence of what is implemented today, not permission to override the target architecture.
+3. `docs/reference/` — historical product and feature evidence used to avoid losing valuable behavior.
 
--   `docs/DEVELOPER_MAP.md` --- high-level model of FluxBar Desktop and
-    its intended data/UI flows.
--   `docs/ARCHITECTURE_DECISIONS.md` --- durable product/architecture
-    invariants that must not be accidentally violated.
--   `docs/features/MACOS_UI.md` --- macOS Menu Bar popover, navigation,
-    article rows, interactions, Spotlight/shortcut direction.
--   `docs/features/SYNC_AND_DATA.md` --- SQLite, local-first behavior,
-    Miniflux sync, image caching, mark-as-read-on-scrollover.
--   `docs/features/PODCASTS.md` --- podcast playback, position sync,
-    mini player, chapters, speed, Now Playing.
--   `docs/features/NOTIFICATIONS.md` --- selective feed notifications
-    and batching behavior.
--   `docs/RELEASE_AND_DISTRIBUTION.md` --- intended macOS distribution
-    channels and constraints.
--   `docs/PRODUCT_BACKLOG.md` --- ideas and unresolved future work;
-    backlog items are not necessarily implemented.
--   `docs/RUST_CORE_MIGRATION.md` --- active Go-to-Rust core migration
-    plan; read for Rust-core migration work.
--   `docs/CORE_COMPATIBILITY_CONTRACT.md` --- audited external Go-core
-    contract that Rust must preserve during compatibility migration.
--   `docs/RUST_CORE_TESTING.md` --- compatibility, differential, ABI,
-    and database-interoperability testing rules for the migration.
+If reference material conflicts with `ARCHITECTURE_DECISIONS.md`, the architecture decisions win.
 
-Do not assume documentation describing a target design is already
-implemented. Verify the repository state.
+The former Go core is retired and out of scope. Do not preserve Go compatibility, Go ABI behavior, Go database interoperability, or Go migration phases unless a task explicitly asks for historical analysis.
 
-## Understand Before Changing
+## Binding Decision
 
-Before modifying code:
+UniFFI is the selected binding technology for the shared Rust core.
+Do not reopen the binding choice or introduce a temporary C/JSON/JNI/Swift bridge as an intermediate architecture unless explicitly requested.
 
--   Inspect the relevant implementation and direct dependencies.
--   Reuse existing Go core behavior and native platform patterns where
-    appropriate.
--   Identify the smallest reasonable scope for the requested change.
--   Distinguish current implementation from target product behavior.
--   Do not infer mobile FluxBar behavior unless it is explicitly
-    documented for FluxBar Desktop.
--   Do not copy features from the mobile FluxBar project merely because
-    they exist there.
+Design the public Rust boundary to be UniFFI-friendly: coarse-grained domain operations, owned DTOs/records/enums, explicit errors, batch operations where appropriate, and no UI-specific concepts.
 
-For non-trivial changes, briefly state the intended approach before
-implementation.
+## Core / Native Boundary
 
-If a task requires a significant architectural decision not implied by
-the code, documentation, or task description, explain the alternatives
-before implementing it.
+The Rust core owns background/domain responsibilities such as persistence, Miniflux communication, sync/reconciliation, durable mutations, article/feed/category data, content processing, cache/media metadata, core settings, queries, and structured core events.
 
-## Product Boundaries
+Native clients own presentation and OS integration: navigation, visible list snapshots, scroll position, gestures, dialogs, theme/layout, browser/share surfaces, secure credential storage, native background scheduling/transfer facilities, playback engines, widgets, and OS notifications.
 
-FluxBar Desktop is primarily a lightweight Miniflux news inbox and
-triage tool, not a traditional full desktop RSS reader.
+A UI interaction may call a core domain operation, but the core API must not be named or shaped around a swipe, button, context menu, pull-to-refresh, or other UI mechanism.
 
--   Miniflux is the remote source of truth for feed/article state.
--   Web articles are normally opened in the user's browser.
--   Do not introduce a full embedded browser or full article-reading
-    surface without an explicit product decision.
--   Podcast audio is an intentional exception and may be consumed
-    directly inside FluxBar.
--   The macOS application is Menu Bar first and uses a native popover.
--   The UI should be native to each platform. Do not compromise macOS UX
-    for future Windows/Linux UI reuse.
--   Platform-independent business logic belongs in the portable core.
-    Rust is the default implementation and future shared core. The existing Go
-    core is deprecated for future development but remains a behavioral
-    reference and explicit temporary fallback.
--   Platform-specific presentation and OS integration belong in the
-    native UI layer.
--   Swipe gestures are optional accelerators; no important action may
-    depend on gestures alone.
+## Implementation Rules
 
-See `docs/ARCHITECTURE_DECISIONS.md` for the full set of invariants.
+- Prefer the smallest durable implementation that advances the target architecture.
+- Do not create parallel implementations when an existing target abstraction can be extended cleanly.
+- Do not perform broad compatibility audits or exploratory PoCs unless a concrete unresolved blocker requires them.
+- Reuse old documentation only as evidence of required behavior or feature coverage.
+- Keep visible UI snapshots independent from background core state changes as defined in the architecture decisions.
+- Keep secrets out of core persistence and logs.
+- Keep changes focused; report unrelated issues instead of fixing them automatically.
+- New dependencies require a concrete justification.
 
-## macOS UI Rules
-
--   Prefer SwiftUI and AppKit system behavior over custom imitation of
-    macOS styling.
--   The sidebar is hidden by default.
--   Revealing navigation should expand the popover horizontally rather
-    than significantly shrinking the article content column.
--   Article rows are optimized for scanning and triage.
--   Use progressive disclosure for secondary actions: hover controls,
-    context menus, compact overflow controls.
--   Clicking a normal article opens its original URL in the
-    configured/default browser.
--   Preserve future keyboard, Spotlight, App Intent, and deep-link
-    routing by keeping selection/navigation state independent from
-    individual views.
-
-## Data and Sync Rules
-
--   Local SQLite data should allow the popover to render immediately
-    without waiting for Miniflux.
--   Read/unread and starred actions should update local state
-    immediately and synchronize through the established sync mechanism.
--   Never treat image cache data as durable application state.
--   Automatic mark-as-read-on-scrollover must require meaningful
-    visibility and must not mass-mark content skipped by jumps or
-    programmatic navigation.
--   Sync completion itself is not a user notification event.
-
-## Podcasts
-
--   Reuse existing shared podcast logic where available.
--   Preserve synchronized playback position.
--   Distinguish Stop from Eject.
--   FluxBar should provide its own compact controls and also integrate
-    with macOS Now Playing.
--   Chapters and playback speed are important player features.
-
-## Implementation
-
--   Keep changes focused on the requested task.
--   Prefer modifying existing abstractions over creating parallel
-    implementations.
--   Avoid unrelated cleanup or refactoring.
--   Avoid new dependencies unless clearly justified.
--   Preserve public interfaces unless changing them is part of the task.
--   Do not silently change behavior outside the requested scope.
--   If an unrelated issue is discovered, report it instead of fixing it
-    automatically.
+If a requested change requires a product/architecture decision not already covered by `ARCHITECTURE_DECISIONS.md`, stop and surface that decision instead of guessing.
 
 ## Validation
 
-Use validation appropriate to the actual repository and affected target.
+Run validation appropriate to the changed Rust/native target. Never claim a build, test, migration, or command succeeded unless it was actually executed successfully.
 
-For macOS UI changes, build the affected macOS target and run relevant
-tests. For Go changes, run the relevant Go tests and static checks
-already established by the repository. For Rust-core migration changes,
-also run the Rust checks and compatibility validation defined in
-`docs/RUST_CORE_TESTING.md`.
-
-Never claim a build, test, or command succeeded unless it was actually
-executed successfully.
-
-## Risk-Based Review
-
-Apply additional scrutiny when changes affect:
-
--   persistence/database migrations
--   Miniflux synchronization/reconciliation
--   concurrency/background execution
--   credentials/authentication/security/privacy
--   automatic read-state mutation
--   notifications
--   audio sessions/media state
--   playback-position synchronization
--   native platform bridges
--   signing/notarization/App Store/Homebrew distribution
-
-Explicitly mention meaningful risks in the final review.
+Give extra scrutiny to persistence/schema changes, Miniflux sync/reconciliation, concurrency/background execution, credentials/security/privacy, automatic read-state mutation, notifications, media/download state, UniFFI boundaries, and destructive reset/cleanup behavior.
 
 ## Human Review Summary
 
-After a non-trivial implementation, provide a concise review grouped by
-logical change.
+After non-trivial implementation, report briefly:
 
-For each logical change include:
+- **What** changed.
+- **Why** it was needed.
+- **Code** files/symbols worth reviewing.
+- **Risk** only where meaningful.
+- **Validation** actually executed.
+- **Open decision** only if human input is genuinely required before proceeding.
 
-### `<short description>`
-
-**What:** What behavior or implementation changed.
-
-**Why:** Why it was necessary.
-
-**Code:** Relevant files and symbols to inspect.
-
-**Risk:** Only when there is a meaningful risk, tradeoff, compatibility
-concern, or behavior deserving attention.
-
-Then finish with:
-
-### Validation
-
-List only checks actually performed and their results.
-
-### Review Focus
-
-List the areas that deserve particular human attention.
-
-## Context Efficiency
-
-Read only the documentation relevant to the task. Avoid repeatedly
-loading unchanged files or unrelated feature documents.
-
-The goal is to spend agent context on understanding, implementing,
-validating, and explaining the requested change.
-
-## Active Go-to-Rust Core Migration
-
-FluxBar is incrementally migrating the portable core from Go to Rust.
-
-During this migration:
-
--   The existing Go core is the deprecated behavioral reference
-    implementation.
--   Keep Go and Rust implementations side by side until Rust has proven
-    compatible and stable.
--   Compatibility comes before redesign. Do not silently fix unusual Go
-    behavior while porting it.
--   Preserve the current C/JSON bridge initially, including
-    `FluxCoreRequest` / `FluxCoreFree`, JSON field semantics, snapshot
-    compatibility, and SQLite interoperability.
--   Do not introduce UniFFI during the initial compatibility migration.
-    UniFFI is a later, separately evaluated adapter.
--   Do not redesign the SQLite schema as part of the language migration.
--   Do not move platform-specific macOS behavior into Rust merely to
-    share more code.
--   Keep FFI concerns at the outer adapter boundary. Domain code must
-    not depend on raw C pointers, Swift, AppKit, or SwiftUI.
--   Rust is now the default core for normal development/local builds and the
-    first-public-release candidate; Go remains the reference implementation and
-    explicit fallback.
--   Do not advance into a later migration phase unless the task requests
-    it.
-
-For Rust migration tasks, read `docs/RUST_CORE_MIGRATION.md`,
-`docs/CORE_COMPATIBILITY_CONTRACT.md`, and `docs/RUST_CORE_TESTING.md`
-in addition to the normal task-specific documentation.
+Do not generate a new roadmap unless explicitly asked.
