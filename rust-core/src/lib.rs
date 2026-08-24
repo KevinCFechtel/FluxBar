@@ -29,6 +29,8 @@
 //! reference while Phase 10 orchestration/deadline risks are remediated. All
 //! `unsafe` code is confined to the `ffi` module.
 
+#[cfg(all(feature = "mobile-runtime-proof", target_os = "android"))]
+pub mod android_jni;
 pub mod article;
 mod dispatcher;
 pub mod domain;

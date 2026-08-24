@@ -1,10 +1,10 @@
-# Mobile Runtime Proof — Phase 1A/1B Status
+# Mobile Runtime Proof — Phase 1A/1B/1C Status
 
 This document records the result of **Phase 1A: Reproducible target and dependency
-preflight** and **Phase 1B: iOS runtime host proof** from
-`docs/MOBILE_RUNTIME_PROOF_CONTRACT.md`. It is an evidence report, not a product
-decision. No native FluxNews application, mobile schema, binding technology, or
-production API has been created.
+preflight**, **Phase 1B: iOS runtime host proof**, and **Phase 1C: Android runtime
+host proof** from `docs/MOBILE_RUNTIME_PROOF_CONTRACT.md`. It is an evidence
+report, not a product decision. No native FluxNews application, mobile schema,
+binding technology, or production API has been created.
 
 ## Scope of this document
 
@@ -26,6 +26,15 @@ Phase 1B answers:
    function on the iOS simulator.
 4. Whether the iOS trust-store blocker identified in Phase 1A can be reproduced
    and safely fixed.
+
+Phase 1C answers:
+
+1. Whether the existing C/JSON ABI works on Android through a JNI shim.
+2. Whether the Rust core can be packaged as loadable Android `.so` libraries.
+3. Whether `rustls-platform-verifier` can be initialized from an Android
+   application `Context` and used for system-trust TLS.
+4. Whether the core's SQLite, threading, panic boundary, and HTTPS/TLS behavior
+   function on an Android runtime.
 
 Physical-device lifecycle validation remains intentionally deferred to Phase 1I.
 
@@ -404,17 +413,14 @@ Phase 1I and is recorded as a residual risk, not a blocker.
 - **iOS trust store:** RESOLVED for the shared HTTP agent by
   `rustls-platform-verifier`. The iOS simulator passes public-root HTTPS and
   invalid-certificate rejection tests.
-- **Android trust store:** `rustls-platform-verifier` requires JVM
-  initialization (`rustls_platform_verifier::android::init_with_env`) and a
-  Kotlin/Gradle component. This must be wired in Phase 1E and verified on
-  emulator/physical device in Phase 1G. Until then, Android TLS remains a
-  residual risk.
+- **Android trust store:** RESOLVED for the shared HTTP agent by wiring
+  `rustls-platform-verifier` JVM initialization through the feature-gated JNI
+  initializer. The Android emulator passes public-root HTTPS and
+  invalid-certificate rejection tests using the pinned verifier AAR.
 
 ### Intentionally deferred to later phases
 
-- Android JNI shim and `.so` packaging (Phase 1E).
-- Minimal Android proof host and instrumentation (Phase 1F).
-- Controlled HTTPS trust matrix on Android and physical iOS (Phase 1G).
+- Controlled HTTPS trust matrix on physical iOS and Android (Phase 1G).
 - Concurrency, panic, and ownership stress tests beyond the baseline coverage
   added here (Phase 1H).
 - Physical-device lifecycle validation (Phase 1I).
@@ -489,10 +495,178 @@ No existing tests were weakened.
 
 ---
 
+## Phase 1C — Android runtime host proof
+
+### What was implemented
+
+1. **Android-specific Rust verifier initializer** (`rust-core/src/android_jni.rs`).
+   - Feature-gated helper `fluxbar_mobile_proof_init_android_verifier` that calls
+     `rustls_platform_verifier::android::init_hosted` with a JVM `Context`.
+   - Absent from default/production artifacts; does not add a third exported
+     production symbol.
+
+2. **NDK C/C++ JNI shim** (`mobile-proof/android/app/src/main/cpp/jni-bridge.cpp`).
+   - Converts Kotlin strings to UTF-8, invokes `FluxCoreRequest`/`FluxCoreFree`,
+     and copies the response back to Kotlin.
+   - Forwards the application `Context` to the Rust verifier initializer.
+   - Links the prebuilt `libfluxcore.a` as a static dependency.
+
+3. **CMake packaging** integrated into `Build/build-rust-android.sh`.
+   - When `CARGO_FEATURES=mobile-runtime-proof`, the script builds
+     `libfluxcore_mobile_probe.so` for all three ABIs using the NDK toolchain.
+   - Locates the pinned `rustls-platform-verifier-android 0.1.1` AAR via
+     `cargo metadata`, copies it into the output tree, and records its SHA-256.
+   - Verifies ELF machines, exported JNI symbols, and `DT_NEEDED` entries.
+   - C++ STL is statically linked so the APK does not depend on
+     `libc++_shared.so`.
+
+4. **Minimal Kotlin proof host** (`mobile-proof/android/`).
+   - `FluxCoreBridge` loads `fluxcore_mobile_probe` and initializes the verifier.
+   - `MainActivity` hosts a simple status UI with manual probe controls.
+   - Uses `noBackupFilesDir` for the probe database and declares only the
+     `INTERNET` permission.
+   - ProGuard/R8 keep rules preserve the verifier Kotlin component.
+
+5. **Instrumentation tests** (`FluxCoreInstrumentedTest`).
+   - 12 tests covering FFI invocation, JSON round-trip, concurrent round-trip
+     with no crossover, SQLite open/write/read/close/reopen, path containment,
+     HTTPS public-root success, invalid-certificate rejection, thread spawn/join,
+     contained panic, and background-thread invocation.
+
+### Android build result
+
+Command run:
+
+```sh
+CARGO_FEATURES=mobile-runtime-proof ./Build/build-rust-android.sh .build/mobile/android-proof release
+```
+
+Artifacts:
+
+```text
+.build/mobile/android-proof/
+    arm64-v8a/libfluxcore.a            aarch64-linux-android
+    x86_64/libfluxcore.a               x86_64-linux-android
+    armeabi-v7a/libfluxcore.a          armv7-linux-androideabi
+    jniLibs/arm64-v8a/libfluxcore_mobile_probe.so
+    jniLibs/x86_64/libfluxcore_mobile_probe.so
+    jniLibs/armeabi-v7a/libfluxcore_mobile_probe.so
+    verifier/rustls-platform-verifier-0.1.1.aar
+    Headers/libfluxcore.h
+    Headers/module.modulemap
+    manifest.json
+```
+
+| Target | `libfluxcore.a` size | `libfluxcore.a` SHA-256 | `.so` size |
+| ------ | -------------------- | ----------------------- | ---------- |
+| `aarch64-linux-android` | 96,891,910 bytes | `fc26453dccf7acabd66669bbaef1c003fc65afc212cb7d493279af0fcb2c3d54` | 23,208,208 bytes |
+| `x86_64-linux-android` | 100,924,550 bytes | `eeafb7c37d3a3bd2161e9b882ec6ac0de52b7c550675273fbf37ae06e9092897` | 23,561,016 bytes |
+| `armv7-linux-androideabi` | 84,977,576 bytes | `bb037442dbe403cdab7eb78b82dea5e00a5d8a7a7f0bc2fb8a58e1c683a57195` | 19,028,680 bytes |
+
+| Component | Value |
+| --------- | ----- |
+| rustls-platform-verifier AAR | 9,287 bytes, SHA-256 `667292cadd8fa589229dd0f716541236a761f29b774930868d218175633830fd` |
+| NDK | `28.2.13676358` |
+| API level | 29 |
+
+Verification:
+
+- NDK `llvm-readelf` confirms correct ELF machines: AArch64, X86-64/AMD64, ARM.
+- Rust `llvm-nm` confirms exported `FluxCoreRequest` and `FluxCoreFree` for every ABI.
+- JNI `.so` exports `Java_com_fluxbar_mobileproof_FluxCoreBridge_request` and
+  `Java_com_fluxbar_mobileproof_FluxCoreBridge_initVerifierNative`.
+- `DT_NEEDED` checks confirm only expected Android system libraries; no OpenSSL,
+  `libc++_shared.so`, or host-specific libraries.
+- Release build with R8 (`:app:assembleRelease` and `:app:assembleReleaseTest`)
+  succeeds; the releaseTest APK launches and loads the native library.
+
+### Android emulator test results
+
+All 12 instrumentation tests pass on an arm64 Android Virtual Device
+(`NormalPhone`, API 37.1):
+
+```sh
+CARGO_FEATURES=mobile-runtime-proof ./Build/build-rust-android.sh .build/mobile/android-proof release
+./Build/test-mobile-runtime-android.sh /Users/kevinfechtel/GitHub/FluxBar/.build/mobile/android-proof
+```
+
+Result: `Finished 12 tests on NormalPhone(AVD) - 17` with 0 failures.
+
+Key observations:
+
+- `runtime_info` reports `os: android`, `arch: aarch64`,
+  `panicStrategy: unwind`, and `mobileRuntimeProofEnabled: true`.
+- `https_get` against `https://httpbin.org/get` returns HTTP 200.
+- `https_get` against `https://self-signed.badssl.com/` fails with a transport
+  error, proving certificate validation is active and cannot be bypassed.
+- The intentional `panic` probe returns the deterministic
+  `{"ok":false,"error":"internal error"}` JSON and the core remains usable.
+
+### x86_64 emulator and physical device notes
+
+- Only arm64 emulator system images are installed on this machine; no x86_64
+  Android emulator is available without downloading additional SDK components.
+  The x86_64 ABI artifact builds, packages, and passes ELF/symbol verification.
+- No physical Android arm64 device was connected during this session. The arm64
+  emulator uses the same `arm64-v8a` ABI as a physical arm64 device and
+  exercises the same native code path, but physical-device lifecycle behavior
+  remains a recorded residual risk per the contract.
+
+### Android TLS blocker resolution
+
+The Phase 1A/1B concern that Android TLS behavior was unverified is **resolved**
+for the shared HTTP agent by wiring `rustls-platform-verifier` JVM
+initialization through the feature-gated JNI initializer. The Android emulator
+now passes public-root HTTPS requests and rejects invalid certificates, so
+Android TLS is no longer a Phase 1 residual risk for the current stack.
+
+---
+
+## Regression validation
+
+All commands succeeded:
+
+```sh
+cargo fmt --manifest-path rust-core/Cargo.toml --check
+cargo check --manifest-path rust-core/Cargo.toml
+cargo check --manifest-path rust-core/Cargo.toml --features mobile-runtime-proof
+cargo test --manifest-path rust-core/Cargo.toml
+cargo test --manifest-path rust-core/Cargo.toml --features mobile-runtime-proof
+cd go-core && go test ./... && go vet ./...
+./Build/test-core-parity.sh
+./Build/build.sh
+FLUX_CORE=rust ./Build/build.sh
+FLUX_CORE=go ./Build/build.sh
+git diff --check
+```
+
+iOS proof host validation:
+
+```sh
+CARGO_FEATURES=mobile-runtime-proof ./Build/build-rust-ios.sh .build/mobile/ios-proof release
+./Build/package-rust-ios-proof.sh .build/mobile/ios-proof .build/mobile/ios-proof/FluxCore.xcframework
+```
+
+Result: iOS Rust archives and XCFramework build successfully. iOS simulator
+XCTest execution was not repeated in this session because `xcodegen` is not
+currently on PATH; the existing 12-test pass from Phase 1B remains valid and no
+iOS source was changed.
+
+Android proof host validation:
+
+```sh
+CARGO_FEATURES=mobile-runtime-proof ./Build/build-rust-android.sh .build/mobile/android-proof release
+./Build/test-mobile-runtime-android.sh /Users/kevinfechtel/GitHub/FluxBar/.build/mobile/android-proof
+```
+
+Result: `Finished 12 tests on NormalPhone(AVD) - 17` with 0 failures.
+
+No existing tests were weakened.
+
+---
+
 ## Next step
 
-**PHASE 1E — Android JNI shim and `.so` packaging** is the recommended next step,
-with the understanding that Android TLS will require
-`rustls-platform-verifier` JVM initialization before Phase 1G can pass. If the
-iOS physical-device validation is considered blocking earlier, **PHASE 1I** may
-be interleaved after Android build artifacts are proven.
+**PHASE 1D — iOS/Android artifact reproducibility and size baselines** is the
+recommended next step, with physical-device lifecycle validation deferred to
+Phase 1I as a recorded residual risk.

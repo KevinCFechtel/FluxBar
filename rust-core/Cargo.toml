@@ -61,6 +61,13 @@ log = { version = "0.4", features = ["release_max_level_info"] }
 # Minimal Unified Logging backend for the `log` facade on Apple platforms.
 oslog = { version = "0.2", features = ["logger"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# JNI types used only by the feature-gated Android verifier initializer in the
+# mobile runtime proof. Already pulled in transitively by rustls-platform-verifier
+# on Android; made explicit so the proof-host glue does not depend on an
+# implementation detail of a transitive dependency.
+jni = { version = "0.21", default-features = false }
+
 [dev-dependencies]
 # Temporary directories for the mobile-runtime-proof SQLite tests.
 tempfile = "3"

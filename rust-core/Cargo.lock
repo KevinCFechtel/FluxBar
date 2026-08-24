@@ -944,6 +944,7 @@ dependencies = [
  "base64",
  "html5ever",
  "image",
+ "jni",
  "log",
  "markup5ever_rcdom",
  "oslog",

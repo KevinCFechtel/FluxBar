@@ -1,0 +1,9 @@
+# Android proof host build outputs and local state
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.cxx/
+*.apk
+*.aab
